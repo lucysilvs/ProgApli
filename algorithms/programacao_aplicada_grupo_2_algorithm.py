@@ -30,133 +30,174 @@ __copyright__ = '(C) 2024 by Grupo 2'
 
 __revision__ = '$Format:%H$'
 
+
+# -- coding: utf-8 --
+
 from qgis.PyQt.QtCore import QCoreApplication
-from qgis.core import (QgsProcessing,
-                       QgsFeatureSink,
-                       QgsProcessingAlgorithm,
-                       QgsProcessingParameterFeatureSource,
-                       QgsProcessingParameterFeatureSink)
+from qgis.core import (QgsProcessingAlgorithm,
+                       QgsProcessingParameterVectorLayer,
+                       QgsProcessingParameterNumber,
+                       QgsProcessingParameterRasterDestination,
+                       QgsProcessingParameterDistance,
+                       QgsProcessingUtils)
+from qgis import processing
 
+import numpy
 
-class ProgramacaoAplicadaGrupo2Algorithm(QgsProcessingAlgorithm):
-    """
-    This is an example algorithm that takes a vector layer and
-    creates a new identical one.
-
-    It is meant to be used as an example of how to create your own
-    algorithms and explain methods and variables used to do it. An
-    algorithm like this will be available in all elements, and there
-    is not need for additional work.
-
-    All Processing algorithms should extend the QgsProcessingAlgorithm
-    class.
-    """
-
-    # Constants used to refer to parameters and outputs. They will be
-    # used when calling the algorithm from another algorithm, or when
-    # calling from the QGIS console.
-
-    OUTPUT = 'OUTPUT'
-    INPUT = 'INPUT'
-
-    def initAlgorithm(self, config):
-        """
-        Here we define the inputs and output of the algorithm, along
-        with some other properties.
-        """
-
-        # We add the input vector features source. It can have any kind of
-        # geometry.
-        self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT,
-                self.tr('Input layer'),
-                [QgsProcessing.TypeVectorAnyGeometry]
-            )
-        )
-
-        # We add a feature sink in which to store our processed features (this
-        # usually takes the form of a newly created vector layer when the
-        # algorithm is run in QGIS).
-        self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                self.OUTPUT,
-                self.tr('Output layer')
-            )
-        )
-
-    def processAlgorithm(self, parameters, context, feedback):
-        """
-        Here is where the processing itself takes place.
-        """
-
-        # Retrieve the feature source and sink. The 'dest_id' variable is used
-        # to uniquely identify the feature sink, and must be included in the
-        # dictionary returned by the processAlgorithm function.
-        source = self.parameterAsSource(parameters, self.INPUT, context)
-        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-                context, source.fields(), source.wkbType(), source.sourceCrs())
-
-        # Compute the number of steps to display within the progress bar and
-        # get features from source
-        total = 100.0 / source.featureCount() if source.featureCount() else 0
-        features = source.getFeatures()
-
-        for current, feature in enumerate(features):
-            # Stop the algorithm if cancel button has been clicked
-            if feedback.isCanceled():
-                break
-
-            # Add a feature in the sink
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
-
-            # Update the progress bar
-            feedback.setProgress(int(current * total))
-
-        # Return the results of the algorithm. In this case our only result is
-        # the feature sink which contains the processed features, but some
-        # algorithms may return multiple feature sinks, calculated numeric
-        # statistics, etc. These should all be included in the returned
-        # dictionary, with keys matching the feature corresponding parameter
-        # or output names.
-        return {self.OUTPUT: dest_id}
-
-    def name(self):
-        """
-        Returns the algorithm name, used for identifying the algorithm. This
-        string should be fixed for the algorithm, and must not be localised.
-        The name should be unique within each provider. Names should contain
-        lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
-        return 'Solução do projeto 1'
-
-    def displayName(self):
-        """
-        Returns the translated algorithm name, which should be used for any
-        user-visible display of the algorithm name.
-        """
-        return self.tr(self.name())
-
-    def group(self):
-        """
-        Returns the name of the group this algorithm belongs to. This string
-        should be localised.
-        """
-        return self.tr(self.groupId())
-
-    def groupId(self):
-        """
-        Returns the unique ID of the group this algorithm belongs to. This
-        string should be fixed for the algorithm, and must not be localised.
-        The group id should be unique within each provider. Group id should
-        contain lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
-        return 'Projeto 1'
+class TrafegabilidadeAlgorithm(QgsProcessingAlgorithm):
+    INPUT_VIAS = 'INPUT_VIAS'
+    BUFFER_VIAS = 'BUFFER_VIAS'
+    INPUT_VEGETACAO = 'INPUT_VEGETACAO'
+    INPUT_MASSA_DAGUA = 'INPUT_MASSA_DAGUA'
+    INPUT_TRECHO_DRENAGEM = 'INPUT_TRECHO_DRENAGEM'
+    BUFFER_DRENAGEM = 'BUFFER_DRENAGEM'
+    INPUT_AREA_EDIFICADA = 'INPUT_AREA_EDIFICADA'
+    PIXEL_SIZE = 'PIXEL_SIZE'
+    OUTPUT_RASTER = 'OUTPUT_RASTER'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
 
     def createInstance(self):
-        return ProgramacaoAplicadaGrupo2Algorithm()
+        return TrafegabilidadeAlgorithm()
+
+    def name(self):
+        return 'trafegabilidade'
+
+    def displayName(self):
+        return self.tr('Carta de Trafegabilidade')
+
+    def group(self):
+        return self.tr('Exemplos')
+
+    def groupId(self):
+        return 'exemplos'
+
+    def shortHelpString(self):
+        return self.tr("Cria um raster de trafegabilidade com base em critérios específicos.")
+
+    def initAlgorithm(self, config=None):
+        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_VIAS, self.tr('Vias de Deslocamento')))
+        self.addParameter(QgsProcessingParameterDistance(self.BUFFER_VIAS, self.tr('Buffer para Vias de Deslocamento'), parentParameterName=self.INPUT_VIAS))
+        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_VEGETACAO, self.tr('Vegetação')))
+        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_MASSA_DAGUA, self.tr('Massa d\'Água')))
+        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_TRECHO_DRENAGEM, self.tr('Trecho de Drenagem')))
+        self.addParameter(QgsProcessingParameterDistance(self.BUFFER_DRENAGEM, self.tr('Buffer para Trecho de Drenagem'), parentParameterName=self.INPUT_TRECHO_DRENAGEM))
+        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_AREA_EDIFICADA, self.tr('Área Edificada')))
+        self.addParameter(QgsProcessingParameterNumber(self.PIXEL_SIZE, self.tr('Tamanho do Pixel'), QgsProcessingParameterNumber.Double, 10.0))
+        self.addParameter(QgsProcessingParameterRasterDestination(self.OUTPUT_RASTER, self.tr('Raster de Trafegabilidade')))
+
+    def processAlgorithm(self, parameters, context, feedback):
+        vias = self.parameterAsVectorLayer(parameters, self.INPUT_VIAS, context)
+        buffer_vias = self.parameterAsDouble(parameters, self.BUFFER_VIAS, context)
+        vegetacao = self.parameterAsVectorLayer(parameters, self.INPUT_VEGETACAO, context)
+        massa_dagua = self.parameterAsVectorLayer(parameters, self.INPUT_MASSA_DAGUA, context)
+        trecho_drenagem = self.parameterAsVectorLayer(parameters, self.INPUT_TRECHO_DRENAGEM, context)
+        buffer_drenagem = self.parameterAsDouble(parameters, self.BUFFER_DRENAGEM, context)
+        area_edificada = self.parameterAsVectorLayer(parameters, self.INPUT_AREA_EDIFICADA, context)
+        pixel_size = self.parameterAsDouble(parameters, self.PIXEL_SIZE, context)
+        output_raster_path = self.parameterAsOutputLayer(parameters, self.OUTPUT_RASTER, context)
+
+        # Criação do raster base
+        extent = vias.extent()
+        extent.combineExtentWith(vegetacao.extent())
+        extent.combineExtentWith(massa_dagua.extent())
+        extent.combineExtentWith(trecho_drenagem.extent())
+        extent.combineExtentWith(area_edificada.extent())
+        crs = vias.crs()
+        cols = int((extent.xMaximum() - extent.xMinimum()) / pixel_size)
+        rows = int((extent.yMaximum() - extent.yMinimum()) / pixel_size)
+
+        # Criar uma matriz de zeros para armazenar os valores de raster
+        raster_data = numpy.zeros((rows, cols), dtype=numpy.float32)
+
+        # Rasterize as camadas vetoriais com os valores correspondentes
+        # Adequado (1) para vias de deslocamento (buffer)
+        temp_buffer_vias_path = QgsProcessingUtils.generateTempFilename('buffer_vias.shp')
+        processing.run("native:buffer", {
+            'INPUT': vias,
+            'DISTANCE': buffer_vias,
+            'SEGMENTS': 5,
+            'END_CAP_STYLE': 0,
+            'JOIN_STYLE': 0,
+            'MITER_LIMIT': 2,
+            'DISSOLVE': False,
+            'OUTPUT': temp_buffer_vias_path
+        }, context=context, feedback=feedback)
+
+        processing.run("gdal:rasterize", {
+            'INPUT': temp_buffer_vias_path,
+            'FIELD': None,
+            'BURN': 1,
+            'UNITS': 1,
+            'WIDTH': pixel_size,
+            'HEIGHT': pixel_size,
+            'EXTENT': extent,
+            'NODATA': 0,
+            'OPTIONS': '',
+            'DATA_TYPE': 5,
+            'INIT': None,
+            'INVERT': False,
+            'OUTPUT': output_raster_path
+        }, context=context, feedback=feedback)
+
+        # Impeditivo (3) para vegetação, massa d'água, trecho de drenagem (buffer)
+        for layer in [vegetacao, massa_dagua, trecho_drenagem]:
+            temp_layer_path = QgsProcessingUtils.generateTempFilename('buffer_layer.shp')
+            processing.run("native:buffer", {
+                'INPUT': layer,
+                'DISTANCE': buffer_drenagem,
+                'SEGMENTS': 5,
+                'END_CAP_STYLE': 0,
+                'JOIN_STYLE': 0,
+                'MITER_LIMIT': 2,
+                'DISSOLVE': False,
+                'OUTPUT': temp_layer_path
+            }, context=context, feedback=feedback)
+
+            processing.run("gdal:rasterize", {
+                'INPUT': temp_layer_path,
+                'FIELD': None,
+                'BURN': 3,
+                'UNITS': 1,
+                'WIDTH': pixel_size,
+                'HEIGHT': pixel_size,
+                'EXTENT': extent,
+                'NODATA': 0,
+                'OPTIONS': '',
+                'DATA_TYPE': 5,
+                'INIT': None,
+                'INVERT': False,
+                'OUTPUT': output_raster_path
+            }, context=context, feedback=feedback)
+
+        # Restritivo (2) para área edificada
+        temp_area_edificada_path = QgsProcessingUtils.generateTempFilename('area_edificada.shp')
+        processing.run("native:buffer", {
+            'INPUT': area_edificada,
+            'DISTANCE': buffer_drenagem,
+            'SEGMENTS': 5,
+            'END_CAP_STYLE': 0,
+            'JOIN_STYLE': 0,
+            'MITER_LIMIT': 2,
+            'DISSOLVE': False,
+            'OUTPUT': temp_area_edificada_path
+        }, context=context, feedback=feedback)
+
+        processing.run("gdal:rasterize", {
+            'INPUT': temp_area_edificada_path,
+            'FIELD': None,
+            'BURN': 2,
+            'UNITS': 1,
+            'WIDTH': pixel_size,
+            'HEIGHT': pixel_size,
+            'EXTENT': extent,
+            'NODATA': 0,
+            'OPTIONS': '',
+            'DATA_TYPE': 5,
+            'INIT': None,
+            'INVERT': False,
+            'OUTPUT': output_raster_path
+        }, context=context, feedback=feedback)
+
+        return {self.OUTPUT_RASTER: output_raster_path}
