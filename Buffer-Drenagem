@@ -1,20 +1,16 @@
 from qgis.core import QgsVectorLayer, QgsField, QgsFeature, QgsGeometry, QgsProject, QgsWkbTypes
 
-# Obtendo as camadas de trecho de drenagem e de via de deslocamento
 CamadaTrechoDrenagem = QgsProject.instance().mapLayersByName("dados_projeto1_2024 — elemnat_trecho_drenagem_l")[0]
 CamadaViaDeslocamento = QgsProject.instance().mapLayersByName("dados_projeto1_2024 — infra_via_deslocamento_l")[0]
 
-# Criando uma nova camada vetorial para armazenar os trechos de drenagem dentro dos buffers
 nome_camada = "TrechoDrenagemNoBuffer"
 uri = "LineString?crs={}".format(CamadaTrechoDrenagem.crs().authid())
 camada_trecho_drenagem_no_buffer = QgsVectorLayer(uri, nome_camada, "memory")
 
-# Adicionando atributos à camada
 camada_trecho_drenagem_no_buffer.startEditing()
 camada_trecho_drenagem_no_buffer.addAttribute(QgsField("ID", QVariant.Int))
 camada_trecho_drenagem_no_buffer.updateFields()
 
-# Iterando sobre os trechos de drenagem e verificando a interseção com os buffers
 for feature in CamadaTrechoDrenagem.getFeatures():
     geom = feature.geometry()
     buffer = geom.buffer(50, -1)  # Buffer de 50 unidades
@@ -29,5 +25,4 @@ for feature in CamadaTrechoDrenagem.getFeatures():
 
 camada_trecho_drenagem_no_buffer.commitChanges()
 
-# Adicionando a nova camada ao projeto
 QgsProject.instance().addMapLayer(camada_trecho_drenagem_no_buffer)
