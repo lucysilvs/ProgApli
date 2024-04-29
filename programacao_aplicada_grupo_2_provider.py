@@ -76,7 +76,7 @@ class ProgramacaoAplicadaGrupo2Provider(QgsProcessingProvider):
 
         This string should be short (e.g. "Lastools") and localised.
         """
-        return self.tr('ProgramacaoAplicadaGrupoo2')
+        return self.tr('ProgramacaoAplicadaGrupo2')
 
     def icon(self):
         """
