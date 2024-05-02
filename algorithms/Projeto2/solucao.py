@@ -31,12 +31,19 @@ __copyright__ = '(C) 2024 by Grupo 2'
 __revision__ = '$Format:%H$'
 
 from qgis.PyQt.QtCore import QCoreApplication
-from qgis.core import (QgsProcessingAlgorithm,
+from qgis.core import (QgsProcessing,
+                       QgsProcessingAlgorithm,
                        QgsProcessingParameterVectorLayer,
-                       QgsProcessingParameterNumber,
-                       QgsProcessingParameterRasterDestination,
-                       QgsProcessingParameterDistance,
-                       QgsProcessingUtils)
+                       QgsProcessingParameterEnum,
+                       QgsProcessingParameterRasterLayer,
+                       QgsVectorLayer,
+                       QgsProcessingException,
+                       QgsFeatureRequest,
+                       QgsProject,
+                       QgsFeature,
+                       QgsProcessingMultiStepFeedback,
+                       QgsProcessingOutputVectorLayer
+                        )
 from qgis import processing
 
 
@@ -58,15 +65,13 @@ class DadosMDTAlgorithm(QgsProcessingAlgorithm):
     # used when calling the algorithm from another algorithm, or when
     # calling from the QGIS console.
 
-    INPUT_VIAS = 'INPUT_VIAS'
-    BUFFER_VIAS = 'BUFFER_VIAS'
-    INPUT_VEGETACAO = 'INPUT_VEGETACAO'
-    INPUT_MASSA_DAGUA = 'INPUT_MASSA_DAGUA'
-    INPUT_TRECHO_DRENAGEM = 'INPUT_TRECHO_DRENAGEM'
-    BUFFER_DRENAGEM = 'BUFFER_DRENAGEM'
-    INPUT_AREA_EDIFICADA = 'INPUT_AREA_EDIFICADA'
-    PIXEL_SIZE = 'PIXEL_SIZE'
-    OUTPUT_RASTER = 'OUTPUT_RASTER'
+    CURVA_NIVEL = 'CURVA_NIVEL'
+    MDT = "MDT"
+    PISTA_POUSO_PONTO = "PISTA_POUSO_PONTO"
+    PISTA_POUSO_LINHA = "PISTA_POUSO_LINHA"
+    PISTA_POUSO_AREA = "PISTA_POUSO_AREA"
+    ESCALA = "ESCALA"
+    CURVA_NIVEL_OUTPUT = "CURVA_NIVEL_OUTPUT"
 
     def initAlgorithm(self, config):
         """
@@ -76,142 +81,170 @@ class DadosMDTAlgorithm(QgsProcessingAlgorithm):
 
         # We add the input vector features source. It can have any kind of
         # geometry.
-        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_VIAS, self.tr('Vias de Deslocamento')))
-        self.addParameter(QgsProcessingParameterDistance(self.BUFFER_VIAS, self.tr('Buffer para Vias de Deslocamento'), parentParameterName=self.INPUT_VIAS))
-        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_VEGETACAO, self.tr('Vegetação')))
-        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_MASSA_DAGUA, self.tr('Massa d\'Água')))
-        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_TRECHO_DRENAGEM, self.tr('Trecho de Drenagem')))
-        self.addParameter(QgsProcessingParameterDistance(self.BUFFER_DRENAGEM, self.tr('Buffer para Trecho de Drenagem'), parentParameterName=self.INPUT_TRECHO_DRENAGEM))
-        self.addParameter(QgsProcessingParameterVectorLayer(self.INPUT_AREA_EDIFICADA, self.tr('Área Edificada')))
-        self.addParameter(QgsProcessingParameterNumber(self.PIXEL_SIZE, self.tr('Tamanho do Pixel'), QgsProcessingParameterNumber.Double, 10.0))
-        self.addParameter(QgsProcessingParameterRasterDestination(self.OUTPUT_RASTER, self.tr('Raster de Trafegabilidade')))
+        self.addParameter(
+            QgsProcessingParameterRasterLayer(
+                self.MDT,
+                self.tr("Insira a camada com o MDT"),
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.CURVA_NIVEL,
+                self.tr("Insira a camada de curva de nível"),
+                types=[QgsProcessing.TypeVectorLine]
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.PISTA_POUSO_PONTO,
+                self.tr("Insira a camada de pista de pouso (ponto)"),
+                types=[QgsProcessing.TypeVectorPoint]
+            )
+        )
+
+
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.PISTA_POUSO_LINHA,
+                self.tr("Insira a camada de pista de pouso (linha)"),
+                types=[QgsProcessing.TypeVectorLine]
+            )
+        )
+        
+
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.PISTA_POUSO_AREA,
+                self.tr("Insira a camada de pista de pouso (área)"),
+                types=[QgsProcessing.TypeVectorPolygon]
+            )
+        )
+
+        # Adiciona a ComboBox de escalas
+        self.addParameter(
+            QgsProcessingParameterEnum(
+                name=self.ESCALA,
+                description=self.tr("Selecione a escala"),
+                options=['1:25.000', '1:50.000', '1:100.000', '1:250.000']
+            )
+        )
+
+        self.addParameter(
+        QgsProcessingOutputVectorLayer(
+            self.CURVA_NIVEL_OUTPUT,
+            self.tr("Camada de Curvas de Nível Processada")
+        )
+    )
 
 
         # We add a feature sink in which to store our processed features (this
         # usually takes the form of a newly created vector layer when the
         # algorithm is run in QGIS).
-        self.addParameter(QgsProcessingParameterRasterDestination(self.OUTPUT_RASTER, self.tr('Raster de Trafegabilidade')))
+        
     
     
     def processAlgorithm(self, parameters, context, feedback):
         """
         Here is where the processing itself takes place.
         """
+        mdt_camada = self.parameterAsRasterLayer(parameters, self.MDT, context)
+        curvas_nivel_camada = self.parameterAsVectorLayer(parameters, self.CURVA_NIVEL, context)
+        pista_pouso_ponto_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_PONTO, context)
+        pista_pouso_linha_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_LINHA, context)
+        pista_pouso_area_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_AREA, context)
+        escala = self.parameterAsString(parameters, self.ESCALA, context)
+        camada_curva_nivel_saida = self.parameterAsVectorLayer(parameters, self.CURVA_NIVEL_OUTPUT, context)
 
-        vias = self.parameterAsVectorLayer(parameters, self.INPUT_VIAS, context)
-        buffer_vias = self.parameterAsDouble(parameters, self.BUFFER_VIAS, context)
-        vegetacao = self.parameterAsVectorLayer(parameters, self.INPUT_VEGETACAO, context)
-        massa_dagua = self.parameterAsVectorLayer(parameters, self.INPUT_MASSA_DAGUA, context)
-        trecho_drenagem = self.parameterAsVectorLayer(parameters, self.INPUT_TRECHO_DRENAGEM, context)
-        buffer_drenagem = self.parameterAsDouble(parameters, self.BUFFER_DRENAGEM, context)
-        area_edificada = self.parameterAsVectorLayer(parameters, self.INPUT_AREA_EDIFICADA, context)
-        pixel_size = self.parameterAsDouble(parameters, self.PIXEL_SIZE, context)
-        output_raster_path = self.parameterAsOutputLayer(parameters, self.OUTPUT_RASTER, context)
 
-        # Criação do raster base
-        extent = vias.extent()
-        extent.combineExtentWith(vegetacao.extent())
-        extent.combineExtentWith(massa_dagua.extent())
-        extent.combineExtentWith(trecho_drenagem.extent())
-        extent.combineExtentWith(area_edificada.extent())
-        crs = vias.crs()
-        cols = int((extent.xMaximum() - extent.xMinimum()) / pixel_size)
-        rows = int((extent.yMaximum() - extent.yMinimum()) / pixel_size)
+        currentStep = 0
+        multiStepFeedback = (
+            QgsProcessingMultiStepFeedback(3, feedback)
+            if feedback is not None
+            else None
+        )     
+        if multiStepFeedback is not None:
+            multiStepFeedback.setCurrentStep(currentStep)
+            multiStepFeedback.pushInfo(
+                self.tr("Gerando nova camada, apenas com as curvas de nível adequadas à escala e com divisão entre normal e mestra...")
+            )
 
-        # Criar uma matriz de zeros para armazenar os valores de raster
-        raster_data = numpy.zeros((rows, cols), dtype=numpy.float32)
+        # Mapear índices para valores de escala
+        indice_escala = {0: '1:25.000', 1: '1:50.000', 2: '1:100.000', 3: '1:250.000'}
 
-        # Rasterize as camadas vetoriais com os valores correspondentes
-        # Adequado (1) para vias de deslocamento (buffer)
-        temp_buffer_vias_path = QgsProcessingUtils.generateTempFilename('buffer_vias.shp')
-        processing.run("native:buffer", {
-            'INPUT': vias,
-            'DISTANCE': buffer_vias,
-            'SEGMENTS': 5,
-            'END_CAP_STYLE': 0,
-            'JOIN_STYLE': 0,
-            'MITER_LIMIT': 2,
-            'DISSOLVE': False,
-            'OUTPUT': temp_buffer_vias_path
-        }, context=context, feedback=feedback)
+        # Recuperar o índice selecionado
+        indice_selecionado = parameters[self.ESCALA]
 
-        processing.run("gdal:rasterize", {
-            'INPUT': temp_buffer_vias_path,
-            'FIELD': None,
-            'BURN': 1,
-            'UNITS': 1,
-            'WIDTH': pixel_size,
-            'HEIGHT': pixel_size,
-            'EXTENT': extent,
-            'NODATA': 0,
-            'OPTIONS': '',
-            'DATA_TYPE': 5,
-            'INIT': None,
-            'INVERT': False,
-            'OUTPUT': output_raster_path
-        }, context=context, feedback=feedback)
+        # Recuperar o valor da escala correspondente ao índice selecionado
+        if indice_selecionado in indice_escala:
+            escala = indice_escala[indice_selecionado]
+        else:
+            # Índice inválido
+            raise QgsProcessingException("Índice de escala inválido selecionado: {}".format(indice_selecionado))
 
-        # Impeditivo (3) para vegetação, massa d'água, trecho de drenagem (buffer)
-        for layer in [vegetacao, massa_dagua, trecho_drenagem]:
-            temp_layer_path = QgsProcessingUtils.generateTempFilename('buffer_layer.shp')
-            processing.run("native:buffer", {
-                'INPUT': layer,
-                'DISTANCE': buffer_drenagem,
-                'SEGMENTS': 5,
-                'END_CAP_STYLE': 0,
-                'JOIN_STYLE': 0,
-                'MITER_LIMIT': 2,
-                'DISSOLVE': False,
-                'OUTPUT': temp_layer_path
-            }, context=context, feedback=feedback)
+        # Determinar a equidistância adequada com base na escala selecionada
+        if escala == '1:25.000':
+            equidistancia = 10
+            multiplo_cota = 5 * (equidistancia)
+        elif escala == '1:50.000':
+            equidistancia = 20
+            multiplo_cota = 5 * (equidistancia)
+        elif escala == '1:100.000':
+            equidistancia = 50
+            multiplo_cota = 5 * (equidistancia)
+        elif escala == '1:250.000':
+            equidistancia = 100
+            multiplo_cota = 5 * (equidistancia)
+        else:
+            # Escala inválida
+            raise QgsProcessingException("Escala inválida selecionada: {}".format(escala))
+        # Obter os valores mínimo e máximo da coluna de cota da tabela de atributos
+        idx_cota = curvas_nivel_camada.fields().lookupField('cota')  # Obtém o índice do campo 'cota'
+        max_cota =  curvas_nivel_camada.maximumValue(idx_cota)
+        
+        # Criar lista de valores de cota com base na equidistância
+        valores_cota = list(range(0, max_cota + 1, equidistancia))
 
-            processing.run("gdal:rasterize", {
-                'INPUT': temp_layer_path,
-                'FIELD': None,
-                'BURN': 3,
-                'UNITS': 1,
-                'WIDTH': pixel_size,
-                'HEIGHT': pixel_size,
-                'EXTENT': extent,
-                'NODATA': 0,
-                'OPTIONS': '',
-                'DATA_TYPE': 5,
-                'INIT': None,
-                'INVERT': False,
-                'OUTPUT': output_raster_path
-            }, context=context, feedback=feedback)
+        # Filtrar os recursos da camada de curva de nível para manter apenas os valores de cota adequados
+        expression = "\"cota\" IN ({})".format(','.join(map(str, valores_cota)))
+        curvas_nivel_filtradas = curvas_nivel_camada.getFeatures(QgsFeatureRequest().setFilterExpression(expression))
 
-        # Restritivo (2) para área edificada
-        temp_area_edificada_path = QgsProcessingUtils.generateTempFilename('area_edificada.shp')
-        processing.run("native:buffer", {
-            'INPUT': area_edificada,
-            'DISTANCE': buffer_drenagem,
-            'SEGMENTS': 5,
-            'END_CAP_STYLE': 0,
-            'JOIN_STYLE': 0,
-            'MITER_LIMIT': 2,
-            'DISSOLVE': False,
-            'OUTPUT': temp_area_edificada_path
-        }, context=context, feedback=feedback)
+        # Criar camada de curva de nível filtrada
+        nova_camada = QgsVectorLayer("LineString?crs={}".format(curvas_nivel_camada.crs().authid()), "Curvas de Nível", "memory")
+        provider = nova_camada.dataProvider()
 
-        processing.run("gdal:rasterize", {
-            'INPUT': temp_area_edificada_path,
-            'FIELD': None,
-            'BURN': 2,
-            'UNITS': 1,
-            'WIDTH': pixel_size,
-            'HEIGHT': pixel_size,
-            'EXTENT': extent,
-            'NODATA': 0,
-            'OPTIONS': '',
-            'DATA_TYPE': 5,
-            'INIT': None,
-            'INVERT': False,
-            'OUTPUT': output_raster_path
-        }, context=context, feedback=feedback)
+        # Adicionar atributos à camada
+        fields = curvas_nivel_camada.fields().toList()
+        provider.addAttributes(fields)
+        nova_camada.updateFields()
 
-        # Return the results of the algorithm.
-        return {self.OUTPUT_RASTER: output_raster_path}
+        # Adicionar recursos filtrados à camada
+        for feature in curvas_nivel_filtradas:
+            # Adicionar o recurso à camada
+            nova_feature = QgsFeature(feature)
+            # Verificar se o valor de cota é um múltiplo de multiplo_cota
+            if nova_feature['cota'] % multiplo_cota == 0:
+                # Se for, definir o valor de índice como 1
+                nova_feature.setAttribute('indice', 1)
+            else:
+                # Caso contrário, definir o valor de índice como 2
+                nova_feature.setAttribute('indice', 2)
+            provider.addFeature(nova_feature)
+
+        # Adicionar camada resultante ao projeto do QGIS
+        QgsProject.instance().addMapLayer(nova_camada)
+
+        currentStep += 1
+        if multiStepFeedback is not None:
+            multiStepFeedback.setCurrentStep(currentStep)
+            multiStepFeedback.pushInfo(
+                self.tr("Criando Raster")
+            )
+
+        # Retornar o resultado do algoritmo
+        return {self.CURVA_NIVEL_OUTPUT: nova_camada}
+    
 
     def name(self):
         """
