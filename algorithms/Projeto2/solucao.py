@@ -42,7 +42,9 @@ from qgis.core import (QgsProcessing,
                        QgsProject,
                        QgsFeature,
                        QgsProcessingMultiStepFeedback,
-                       QgsProcessingOutputVectorLayer
+                       QgsProcessingParameterVectorDestination,
+                       QgsProcessingContext,
+                       QgsFeedback
                         )
 from qgis import processing
 
@@ -72,6 +74,9 @@ class DadosMDTAlgorithm(QgsProcessingAlgorithm):
     PISTA_POUSO_AREA = "PISTA_POUSO_AREA"
     ESCALA = "ESCALA"
     CURVA_NIVEL_OUTPUT = "CURVA_NIVEL_OUTPUT"
+    PISTA_POUSO_PONTO_OUTPUT = "PISTA_POUSO_PONTO_OUTPUT"
+    PISTA_POUSO_LINHA_OUTPUT = "PISTA_POUSO_LINHA_OUTPUT"
+    PISTA_POUSO_AREA_OUTPUT = "PISTA_POUSO_AREA_OUTPUT"
 
     def initAlgorithm(self, config):
         """
@@ -131,17 +136,38 @@ class DadosMDTAlgorithm(QgsProcessingAlgorithm):
             )
         )
 
-        self.addParameter(
-        QgsProcessingOutputVectorLayer(
-            self.CURVA_NIVEL_OUTPUT,
-            self.tr("Camada de Curvas de Nível Processada")
-        )
-    )
-
-
         # We add a feature sink in which to store our processed features (this
         # usually takes the form of a newly created vector layer when the
         # algorithm is run in QGIS).
+
+        # Output layers
+        self.addParameter(
+            QgsProcessingParameterVectorDestination(
+                self.CURVA_NIVEL_OUTPUT,
+                self.tr("Camada de Curvas de Nível Processada")
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterVectorDestination(
+                self.PISTA_POUSO_PONTO_OUTPUT,
+                self.tr("Camada ponto pista de pouso com altitude preenchida")
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterVectorDestination(
+                self.PISTA_POUSO_LINHA_OUTPUT,
+                self.tr("Camada ponto pista de pouso com altitude preenchida")
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterVectorDestination(
+                self.PISTA_POUSO_AREA_OUTPUT,
+                self.tr("Camada ponto pista de pouso com altitude preenchida")
+            )
+        )
         
     
     
@@ -156,7 +182,9 @@ class DadosMDTAlgorithm(QgsProcessingAlgorithm):
         pista_pouso_area_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_AREA, context)
         escala = self.parameterAsString(parameters, self.ESCALA, context)
         camada_curva_nivel_saida = self.parameterAsVectorLayer(parameters, self.CURVA_NIVEL_OUTPUT, context)
-
+        pista_pouso_ponto_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_PONTO_OUTPUT, context)
+        pista_pouso_linha_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_LINHA_OUTPUT, context)
+        pista_pouso_area_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_AREA_OUTPUT, context)
 
         currentStep = 0
         multiStepFeedback = (
@@ -232,19 +260,133 @@ class DadosMDTAlgorithm(QgsProcessingAlgorithm):
                 nova_feature.setAttribute('indice', 2)
             provider.addFeature(nova_feature)
 
+        camada_curva_nivel_saida = nova_camada
+
         # Adicionar camada resultante ao projeto do QGIS
-        QgsProject.instance().addMapLayer(nova_camada)
+        QgsProject.instance().addMapLayer(camada_curva_nivel_saida)
 
         currentStep += 1
         if multiStepFeedback is not None:
             multiStepFeedback.setCurrentStep(currentStep)
             multiStepFeedback.pushInfo(
-                self.tr("Criando Raster")
+                self.tr("Amostrando camada raster para obter altitude das pistas de pouso...")
             )
 
+        ####################### CAMADA PONTO DA PISTA DE POUSO #######################  
+        pista_pouso_ponto_output = self.processar_camada(pista_pouso_ponto_camada, mdt_camada, context)
+        # Adicionar camada resultante ao projeto do QGIS
+        QgsProject.instance().addMapLayer(pista_pouso_ponto_output)
+        pista_pouso_ponto_output.setName('pista_pouso_ponto_output')
+
+        ####################### CAMADA LINHA DA PISTA DE POUSO #######################
+
+        pista_pouso_linha_output = self.centroids(pista_pouso_linha_camada, context)
+        pista_pouso_linha_output = self.processar_camada(pista_pouso_linha_output, mdt_camada, context)
+        # Adicionar camada resultante ao projeto do QGIS
+        QgsProject.instance().addMapLayer(pista_pouso_linha_output)
+        pista_pouso_linha_output.setName('pista_pouso_linha_output')
+
+        ####################### CAMADA AREA DA PISTA DE POUSO ####################### 
+
+        pista_pouso_area_output = self.centroids(pista_pouso_area_camada, context)
+        pista_pouso_area_output = self.processar_camada(pista_pouso_area_output, mdt_camada, context)
+        # Adicionar camada resultante ao projeto do QGIS
+        QgsProject.instance().addMapLayer(pista_pouso_area_output)
+        pista_pouso_area_output.setName('pista_pouso_area_output')
+
         # Retornar o resultado do algoritmo
-        return {self.CURVA_NIVEL_OUTPUT: nova_camada}
+        return {self.CURVA_NIVEL_OUTPUT: camada_curva_nivel_saida, 
+                self.PISTA_POUSO_PONTO_OUTPUT: pista_pouso_ponto_output, 
+                self.PISTA_POUSO_LINHA_OUTPUT: pista_pouso_linha_output, 
+                self.PISTA_POUSO_AREA_OUTPUT: pista_pouso_area_output}
     
+    
+    #processing.run("native:rastersampling", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/dados_projeto2_2024.gpkg|layername=infra_pista_pouso_p','RASTERCOPY':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/MDT_Projeto2.tif','COLUMN_PREFIX':'SAMPLE_','OUTPUT':'TEMPORARY_OUTPUT'})
+    
+    def rastersampling(self, camada: QgsVectorLayer, camada_raster: str, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
+            output = processing.run(
+                "native:rastersampling",
+                {
+                    "INPUT": camada,
+                    "RASTERCOPY": camada_raster,
+                    'COLUMN_PREFIX':'altitude',
+                    "OUTPUT": "memory:"
+                },
+                context=context,
+                feedback = feedback
+            )["OUTPUT"]
+            return output
+    
+    #processing.run("native:deletecolumn", {'INPUT':'memory://MultiPoint?crs=EPSG:4674&field=fid:long(0,0)&field=nome:string(255,0)&field=tipo:integer(0,0)&field=revestimento:integer(0,0)&field=uso_pista:integer(0,0)&field=situacao_fisica:integer(0,0)&field=altitude:double(0,0)&field=altitude1:double(0,0)&uid={b5fb1db1-5908-4297-afe4-70a680417b25}','COLUMN':['altitude'],'OUTPUT':'TEMPORARY_OUTPUT'})
+
+    def deletecolumn(self, camada: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
+            output = processing.run(
+                "native:deletecolumn",
+                {
+                    "INPUT": camada,
+                    "COLUMN": ['altitude'],
+                    "OUTPUT": "memory:"
+                },
+                context=context,
+                feedback = feedback
+            )["OUTPUT"]
+            return output
+    
+    #processing.run("native:renametablefield", {'INPUT':'memory://MultiPoint?crs=EPSG:4674&field=fid:long(0,0)&field=nome:string(255,0)&field=tipo:integer(0,0)&field=revestimento:integer(0,0)&field=uso_pista:integer(0,0)&field=situacao_fisica:integer(0,0)&field=altitude1:double(0,0)&uid={3cfc3882-ea41-4fe3-80cd-ca7d23f212e4}','FIELD':'altitude1','NEW_NAME':'altitude','OUTPUT':'TEMPORARY_OUTPUT'})
+
+    def renametablefield(self, camada: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
+            output = processing.run(
+                "native:renametablefield",
+                {
+                    "INPUT": camada,
+                    'FIELD':'altitude1',
+                    'NEW_NAME':'altitude',
+                    "OUTPUT": "memory:"
+                },
+                context=context,
+                feedback = feedback
+            )["OUTPUT"]
+            return output
+    
+    #processing.run("native:centroids", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/dados_projeto2_2024.gpkg|layername=infra_pista_pouso_l','ALL_PARTS':False,'OUTPUT':'TEMPORARY_OUTPUT'})
+
+    def centroids(self, camada: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
+            output = processing.run(
+                "native:centroids",
+                {
+                    "INPUT": camada,
+                    "ALL_PARTS": False,
+                    "OUTPUT": "memory:"
+                },
+                context=context,
+                feedback = feedback
+            )["OUTPUT"]
+            return output
+    
+    def processar_camada(self,camada, mdt_camada, context):
+        # Chama a função rastersampling para obter a camada de pontos pista_pouso_ponto_output
+        output = self.rastersampling(camada, mdt_camada, context)
+
+        # Arredonda os valores da coluna pista_pouso_ponto_output para uma casa decimal
+        for feature in output.getFeatures():
+            # Obter o valor da coluna altitude1
+            valor_amostrado = feature.attribute('altitude1')
+            # Verificar se o valor é do tipo float
+            if isinstance(valor_amostrado, float):
+                # Arredondar para uma casa decimal
+                novo_valor_amostrado = round(valor_amostrado, 1)
+                # Atualizar o valor da coluna altitude1
+                feature.setAttribute('altitude1', novo_valor_amostrado)
+                # Salvar as alterações
+                output.dataProvider().changeAttributeValues({feature.id(): {feature.fieldNameIndex('altitude1'): novo_valor_amostrado}}) 
+
+        # Remover coluna e renomear campo
+        output = self.deletecolumn(output, context)
+        output = self.renametablefield(output, context)
+
+        # Retornar a camada modificada
+        return output
+
 
     def name(self):
         """
