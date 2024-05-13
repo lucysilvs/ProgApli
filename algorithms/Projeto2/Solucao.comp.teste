@@ -1,0 +1,172 @@
+from qgis.PyQt.QtCore import QCoreApplication
+from qgis.core import (QgsProcessing,
+                       QgsProcessingAlgorithm,
+                       QgsProcessingParameterVectorLayer,
+                       QgsProcessingParameterEnum,
+                       QgsVectorLayer,
+                       QgsFeatureRequest,
+                       QgsProcessingMultiStepFeedback,
+                       QgsProcessingParameterVectorDestination,
+                       QgsProcessingContext,
+                       QgsFeature,
+                       QgsProcessingException,
+                       QgsProject)
+from qgis import processing
+
+class DadosMDTAlgorithm(QgsProcessingAlgorithm):
+
+    # Constantes para referenciar parâmetros e saídas
+    CURVA_NIVEL = 'CURVA_NIVEL'
+    MDT = "MDT"
+    PISTA_POUSO_PONTO = "PISTA_POUSO_PONTO"
+    PISTA_POUSO_LINHA = "PISTA_POUSO_LINHA"
+    PISTA_POUSO_AREA = "PISTA_POUSO_AREA"
+    ESCALA = "ESCALA"
+    CURVA_NIVEL_OUTPUT = "CURVA_NIVEL_OUTPUT"
+    PISTA_POUSO_PONTO_OUTPUT = "PISTA_POUSO_PONTO_OUTPUT"
+    PISTA_POUSO_LINHA_OUTPUT = "PISTA_POUSO_LINHA_OUTPUT"
+    PISTA_POUSO_AREA_OUTPUT = "PISTA_POUSO_AREA_OUTPUT"
+    AREA_PONTO_COTADO = "AREA_PONTO_COTADO"
+
+    def initAlgorithm(self, config):
+        # Adiciona parâmetro de entrada para camada de curvas de nível
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.CURVA_NIVEL,
+                self.tr("Insira a camada de curva de nível"),
+                types=[QgsProcessing.TypeVectorLine]
+            )
+        )
+
+        # Adiciona parâmetro de entrada para o MDT
+        self.addParameter(
+            QgsProcessingParameterRasterLayer(
+                self.MDT,
+                self.tr("Insira a camada com o MDT"),
+            )
+        )
+
+        # Adiciona parâmetro de entrada para a camada de pista de pouso (ponto)
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.PISTA_POUSO_PONTO,
+                self.tr("Insira a camada de pista de pouso (ponto)"),
+                types=[QgsProcessing.TypeVectorPoint]
+            )
+        )
+
+        # Adiciona parâmetro de entrada para a camada de pista de pouso (linha)
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.PISTA_POUSO_LINHA,
+                self.tr("Insira a camada de pista de pouso (linha)"),
+                types=[QgsProcessing.TypeVectorLine]
+            )
+        )
+
+        # Adiciona parâmetro de entrada para a camada de pista de pouso (área)
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.PISTA_POUSO_AREA,
+                self.tr("Insira a camada de pista de pouso (área)"),
+                types=[QgsProcessing.TypeVectorPolygon]
+            )
+        )
+
+        # Adiciona a ComboBox de escalas
+        self.addParameter(
+            QgsProcessingParameterEnum(
+                name=self.ESCALA,
+                description=self.tr("Selecione a escala"),
+                options=['1:25.000', '1:50.000', '1:100.000', '1:250.000']
+            )
+        )
+
+        # Adiciona parâmetro de entrada para a área de recorte
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.AREA_PONTO_COTADO,
+                self.tr("Insira o quadrado de área para recorte de camadas"),
+                types=[QgsProcessing.TypeVectorPolygon]
+            )
+        )
+
+        # Adiciona saída para a camada de curva de nível processada
+        self.addParameter(
+            QgsProcessingParameterVectorDestination(
+                self.CURVA_NIVEL_OUTPUT,
+                self.tr("Camada de Curvas de Nível Processada")
+            )
+        )
+
+        # Adiciona saída para a camada de pista de pouso (ponto) com altitude preenchida
+        self.addParameter(
+            QgsProcessingParameterVectorDestination(
+                self.PISTA_POUSO_PONTO_OUTPUT,
+                self.tr("Camada ponto pista de pouso com altitude preenchida")
+            )
+        )
+
+        # Adiciona saída para a camada de pista de pouso (linha) com altitude preenchida
+        self.addParameter(
+            QgsProcessingParameterVectorDestination(
+                self.PISTA_POUSO_LINHA_OUTPUT,
+                self.tr("Camada ponto pista de pouso com altitude preenchida")
+            )
+        )
+
+        # Adiciona saída para a camada de pista de pouso (área) com altitude preenchida
+        self.addParameter(
+            QgsProcessingParameterVectorDestination(
+                self.PISTA_POUSO_AREA_OUTPUT,
+                self.tr("Camada ponto pista de pouso com altitude preenchida")
+            )
+        )
+
+    def processAlgorithm(self, parameters, context, feedback):
+        # Obtém os parâmetros de entrada
+        curvas_nivel_camada = self.parameterAsVectorLayer(parameters, self.CURVA_NIVEL, context)
+        mdt_camada = self.parameterAsRasterLayer(parameters, self.MDT, context)
+        pista_pouso_ponto_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_PONTO, context)
+        pista_pouso_linha_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_LINHA, context)
+        pista_pouso_area_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_AREA, context)
+        escala = self.parameterAsString(parameters, self.ESCALA, context)
+        camada_curva_nivel_saida = self.parameterAsVectorLayer(parameters, self.CURVA_NIVEL_OUTPUT, context)
+        pista_pouso_ponto_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_PONTO_OUTPUT, context)
+        pista_pouso_linha_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_LINHA_OUTPUT, context)
+        pista_pouso_area_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_AREA_OUTPUT, context)
+        area_ponto_cotado = self.parameterAsVectorLayer(parameters, self.AREA_PONTO_COTADO, context)
+
+        # Criar o algoritmo para identificar a curva de nível interna e o ponto mais alto
+        complementar_algorithm = DadosMDTComplementarAlgorithm()
+
+        # Definir os parâmetros para o algoritmo complementar
+        complementar_params = {
+            'CURVA_NIVEL': curvas_nivel_camada,
+            'MDT': mdt_camada,
+            'AREA_PONTO_COTADO': area_ponto_cotado
+        }
+
+        # Executar o algoritmo complementar
+        outputs = complementar_algorithm.processAlgorithm(complementar_params, context, feedback)
+
+        # Retornar o resultado do algoritmo
+        return outputs
+
+    def name(self):
+        return 'Dados MDT Algorithm'
+
+    def displayName(self):
+        return self.tr(self.name())
+
+    def group(self):
+        return self.tr('Grupo')
+
+    def groupId(self):
+        return 'Grupo'
+
+    def tr(self, string):
+        return QCoreApplication.translate('Processing', string)
+
+    def createInstance(self):
+        return DadosMDTAlgorithm()
