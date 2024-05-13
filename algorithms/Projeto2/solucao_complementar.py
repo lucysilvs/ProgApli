@@ -48,6 +48,7 @@ from qgis.core import (QgsProcessing,
                         )
 from qgis import processing
 
+
 class DadosMDTComplementarAlgorithm(QgsProcessingAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
@@ -79,6 +80,7 @@ class DadosMDTComplementarAlgorithm(QgsProcessingAlgorithm):
     AREA_PONTO_COTADO = "AREA_PONTO_COTADO"
     PONTOS_COTADOS_OUTPUT = "PONTOS_COTADOS_OUTPUT"
 
+ 
     def initAlgorithm(self, config):
         """
         Here we define the inputs and output of the algorithm, along
