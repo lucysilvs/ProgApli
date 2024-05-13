@@ -158,14 +158,14 @@ class DadosMDTAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterVectorDestination(
                 self.PISTA_POUSO_LINHA_OUTPUT,
-                self.tr("Camada ponto pista de pouso com altitude preenchida")
+                self.tr("Camada linha pista de pouso com altitude preenchida")
             )
         )
 
         self.addParameter(
             QgsProcessingParameterVectorDestination(
                 self.PISTA_POUSO_AREA_OUTPUT,
-                self.tr("Camada ponto pista de pouso com altitude preenchida")
+                self.tr("Camada área pista de pouso com altitude preenchida")
             )
         )
         
