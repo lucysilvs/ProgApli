@@ -34,6 +34,7 @@ from qgis.core import QgsProcessingProvider
 from .algorithms.Projeto1.solucao import TrafegabilidadeAlgorithm
 from .algorithms.Projeto2.solucao import DadosMDTAlgorithm
 from .algorithms.Projeto2.solucao_complementar import DadosMDTComplementarAlgorithm
+from .algorithms.Projeto3.solucao import ReambulacaoAlgorithm
 
 
 class ProgramacaoAplicadaGrupo2Provider(QgsProcessingProvider):
@@ -58,6 +59,7 @@ class ProgramacaoAplicadaGrupo2Provider(QgsProcessingProvider):
         self.addAlgorithm(TrafegabilidadeAlgorithm())
         self.addAlgorithm(DadosMDTAlgorithm())
         self.addAlgorithm(DadosMDTComplementarAlgorithm())
+        self.addAlgorithm(ReambulacaoAlgorithm())
         # add additional algorithms here
         # self.addAlgorithm(MyOtherAlgorithm())
 

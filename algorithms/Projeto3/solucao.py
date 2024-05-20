@@ -35,12 +35,8 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterVectorLayer,
                        QgsProcessingParameterDistance,
-                       QgsProcessingParameterRasterLayer,
                        QgsVectorLayer,
-                       QgsProcessingException,
-                       QgsFeatureRequest,
                        QgsProject,
-                       QgsFeature,
                        QgsProcessingMultiStepFeedback,
                        QgsProcessingParameterVectorDestination,
                        QgsProcessingContext,
@@ -90,7 +86,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterVectorLayer(
-                self.EDIFICACAO_PONTO_DIA_1,
+                self.CAMADA_DIA_1,
                 self.tr("Insira a camada do dia 1"),
                 types=[QgsProcessing.TypeVectorPoint, QgsProcessing.TypeVectorLine, QgsProcessing.TypeVectorPolygon]
             )
@@ -98,20 +94,20 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterVectorLayer(
-                self.EDIFICACAO_PONTO_DIA_1,
+                self.CAMADA_DIA_2,
                 self.tr("Insira a camada do dia 2"),
                 types=[QgsProcessing.TypeVectorPoint, QgsProcessing.TypeVectorLine, QgsProcessing.TypeVectorPolygon]
             )
         )        
 
 ##adicionei esse modelo para ser o input da tolreancia, mas tem que mexer ainda, não sei se vai ser buffer mesmo ou se vamos ter que usar outra forma de distancia
-        self.addParameter(
-            QgsProcessingParameterDistance(
-                self.BUFFER_VIA_DESLOCAMENTO,
-                self.tr("Insira o valor do buffer para via de deslocamento"),
-                parentParameterName=self.VIA_DESLOCAMENTO
-            )
-        )
+        #self.addParameter(
+            #QgsProcessingParameterDistance(
+                #self.BUFFER_VIA_DESLOCAMENTO,
+                #self.tr("Insira o valor do buffer para via de deslocamento"),
+                #parentParameterName=self.VIA_DESLOCAMENTO
+            #)
+        #)
 
 ##aqui ainda falta adicionar dois inputs: o do atributo correspondente à chave primaria e o dos atributos a serem ignorados (não sei como faz input de atributo)
 
@@ -121,7 +117,8 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
 
         # Output layers
 
-        ##teremos apenas um output, tem que ajeitar aqui ainda
+        ##teremos apenas um output, tem que ajeitar aqui ainda, talvez colocar aquele "sync" que ele comentou da ultima vez
+        ##tem que ter uma logica a depender da camada de entrada, se a camada dos dias for ponto, o output tem que ser ponto, e por aí vai
         self.addParameter(
             QgsProcessingParameterVectorDestination(
                 self.OUTPUT,
