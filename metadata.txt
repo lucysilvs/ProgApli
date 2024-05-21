@@ -6,7 +6,7 @@
 name=ProgramacaoAplicadaGrupo2
 qgisMinimumVersion=3.0
 description=Solução do Grupo 2
-version=0.1
+version=0.3
 author=Grupo 2
 email=analivia.200012@ime.eb.br
 
