@@ -40,6 +40,7 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingMultiStepFeedback,
                        QgsProcessingParameterVectorDestination,
                        QgsProcessingContext,
+                       QgsProcessingParameterFeatureSink,
                        QgsFeedback
                         )
 from qgis import processing
@@ -117,15 +118,13 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
 
         # Output layers
 
-        ##teremos apenas um output, tem que ajeitar aqui ainda, talvez colocar aquele "sync" que ele comentou da ultima vez
-        ##tem que ter uma logica a depender da camada de entrada, se a camada dos dias for ponto, o output tem que ser ponto, e por aí vai
+        ##tem que ter uma logica a depender da camada de entrada, se a camada dos dias for ponto, o output tem que ser ponto, e por aí vai, acho que isso vamos ajeitar no processamento, mas só colocando aqui para lembrar
+
         self.addParameter(
-            QgsProcessingParameterVectorDestination(
-                self.OUTPUT,
-                self.tr("output do projeto 3 *mudar*")
-            )
-        )      
-    
+            QgsProcessingParameterFeatureSink(
+                self.OUTPUT_CURVA_DE_NIVEL, 
+                self.tr("Output do projeto 3 *mudar*"))
+        )    
     
     def processAlgorithm(self, parameters, context, feedback):
         """
