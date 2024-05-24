@@ -34,11 +34,10 @@ from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessing,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterVectorLayer,
-                       QgsProcessingParameterDistance,
+                       QgsProcessingParameterNumber,
+                       QgsProcessingParameterField,
                        QgsVectorLayer,
-                       QgsProject,
                        QgsProcessingMultiStepFeedback,
-                       QgsProcessingParameterVectorDestination,
                        QgsProcessingContext,
                        QgsProcessingParameterFeatureSink,
                        QgsFeedback
@@ -66,6 +65,9 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
 
     PONTOS_GPS = "PONTOS_GPS"
     CAMADA_DIA_1 = "CAMADA_DIA_1"
+    CAMPOS_SELECIONADOS = "CAMPOS_SELECIONADOS"
+    CHAVE_PRIMARIA = "CHAVE_PRIMARIA"
+    TOLERANCIA = "TOLERANCIA"
     CAMADA_DIA_2 = "CAMADA_DIA_2"
     OUTPUT = "OUTPUT"
 
@@ -99,18 +101,38 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
                 self.tr("Insira a camada do dia 2"),
                 types=[QgsProcessing.TypeVectorPoint, QgsProcessing.TypeVectorLine, QgsProcessing.TypeVectorPolygon]
             )
-        )        
+        )    
 
-##adicionei esse modelo para ser o input da tolreancia, mas tem que mexer ainda, não sei se vai ser buffer mesmo ou se vamos ter que usar outra forma de distancia
-        #self.addParameter(
-            #QgsProcessingParameterDistance(
-                #self.BUFFER_VIA_DESLOCAMENTO,
-                #self.tr("Insira o valor do buffer para via de deslocamento"),
-                #parentParameterName=self.VIA_DESLOCAMENTO
-            #)
-        #)
+        self.addParameter(
+            QgsProcessingParameterNumber(
+                self.TOLERANCIA, 
+                self.tr("Insira a distância de tolerância entre o caminho percorrido e as mudanças (em graus)"),
+                type=QgsProcessingParameterNumber.Double
+                )
+        )
 
-##aqui ainda falta adicionar dois inputs: o do atributo correspondente à chave primaria e o dos atributos a serem ignorados (não sei como faz input de atributo)
+        self.addParameter(
+            QgsProcessingParameterField(
+                self.CHAVE_PRIMARIA,
+                self.tr("Escolha o atributo correspondente à chave primária"),
+                parentLayerParameterName=self.CAMADA_DIA_1,
+                type=QgsProcessingParameterField.Any
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterField(
+                self.CAMPOS_SELECIONADOS,
+                self.tr("Escolha os atributos a serem IGNORADOS"),
+                parentLayerParameterName=self.CAMADA_DIA_1,
+                type=QgsProcessingParameterField.Any,
+                allowMultiple=True
+            )
+        )    
+
+        
+
+##aqui ainda falta adicionar o input do atributo correspondente à chave primaria
 
         # We add a feature sink in which to store our processed features (this
         # usually takes the form of a newly created vector layer when the
@@ -122,7 +144,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                self.OUTPUT_CURVA_DE_NIVEL, 
+                self.OUTPUT, 
                 self.tr("Output do projeto 3 *mudar*"))
         )    
     
@@ -150,7 +172,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         linha_gps_camada = self.pointstopath(pontos_gps_camada, context)
         
         # Adicionar camada resultante ao projeto do QGIS
-        QgsProject.instance().addMapLayer(linha_gps_camada)
+        #QgsProject.instance().addMapLayer(linha_gps_camada)
 
         currentStep += 1
         if multiStepFeedback is not None:
