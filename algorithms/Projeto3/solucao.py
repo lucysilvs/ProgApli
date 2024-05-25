@@ -36,12 +36,19 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingParameterVectorLayer,
                        QgsProcessingParameterNumber,
                        QgsProcessingParameterField,
-                       QgsVectorLayer,
+                       QgsFeature,
+                       QgsFeatureSink,
                        QgsProcessingMultiStepFeedback,
                        QgsProcessingContext,
                        QgsProcessingParameterFeatureSink,
-                       QgsFeedback
+                       QgsFeedback,
+                       QgsVectorLayer,
+                       QgsProcessingException,
+                       QgsField,
+                       QgsFields,
+                       QgsWkbTypes
                         )
+from PyQt5.QtCore import QVariant
 from qgis import processing
 
 
@@ -65,7 +72,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
 
     PONTOS_GPS = "PONTOS_GPS"
     CAMADA_DIA_1 = "CAMADA_DIA_1"
-    CAMPOS_SELECIONADOS = "CAMPOS_SELECIONADOS"
+    CAMPOS_IGNORADOS = "CAMPOS_IGNORADOS"
     CHAVE_PRIMARIA = "CHAVE_PRIMARIA"
     TOLERANCIA = "TOLERANCIA"
     CAMADA_DIA_2 = "CAMADA_DIA_2"
@@ -122,17 +129,14 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterField(
-                self.CAMPOS_SELECIONADOS,
+                self.CAMPOS_IGNORADOS,
                 self.tr("Escolha os atributos a serem IGNORADOS"),
                 parentLayerParameterName=self.CAMADA_DIA_1,
                 type=QgsProcessingParameterField.Any,
-                allowMultiple=True
+                allowMultiple=True,
+                optional=True
             )
         )    
-
-        
-
-##aqui ainda falta adicionar o input do atributo correspondente à chave primaria
 
         # We add a feature sink in which to store our processed features (this
         # usually takes the form of a newly created vector layer when the
@@ -145,17 +149,21 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterFeatureSink(
                 self.OUTPUT, 
-                self.tr("Output do projeto 3 *mudar*"))
+                self.tr("Output"))
         )    
     
     def processAlgorithm(self, parameters, context, feedback):
-        """
-        Here is where the processing itself takes place.
-        """
+        # Retrieve parameters
         pontos_gps_camada = self.parameterAsVectorLayer(parameters, self.PONTOS_GPS, context)
         camada_dia_1 = self.parameterAsVectorLayer(parameters, self.CAMADA_DIA_1, context)
         camada_dia_2 = self.parameterAsVectorLayer(parameters, self.CAMADA_DIA_2, context)
-        output = self.parameterAsString(parameters, self.OUTPUT, context)
+        tol = self.parameterAsDouble(parameters, self.TOLERANCIA, context)
+        chave_primaria = self.parameterAsString(parameters, self.CHAVE_PRIMARIA, context)
+        campos_ignorados = self.parameterAsFields(parameters, self.CAMPOS_IGNORADOS, context)
+
+        # Checar se as camadas do dia 1 e do dia 2 tem mesmo tipo de geometria
+        if camada_dia_1.wkbType() != camada_dia_2.wkbType():
+            raise QgsProcessingException(self.tr("As camadas do dia 1 e do dia 2 devem ter o mesmo tipo de geometria."))
 
         currentStep = 0
         multiStepFeedback = (
@@ -169,10 +177,11 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
                 self.tr("Gerando uma linha cujos vértices são os pontos da camada de pontos GPS, seguindo a ordem da data de criação...")
             )
 
-        linha_gps_camada = self.pointstopath(pontos_gps_camada, context)
-        
-        # Adicionar camada resultante ao projeto do QGIS
-        #QgsProject.instance().addMapLayer(linha_gps_camada)
+        # Converter pontos GPS para uma linha
+        linha_gps_camada = self.pointstopath(pontos_gps_camada, context, feedback)
+
+        # Buffer em torno da linha percorrida (GPS)
+        linha_gps_buffer = self.buffer(linha_gps_camada, tol, context, feedback)
 
         currentStep += 1
         if multiStepFeedback is not None:
@@ -181,10 +190,48 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
                 self.tr("Proximo passo...")
             )
 
-        # Retornar o resultado do algoritmo
-        return {self.OUTPUT: output}
-    
 
+        geometry_type = camada_dia_1.wkbType()
+
+        fields = QgsFields()
+        fields.append(QgsField(chave_primaria, QVariant.String))
+        fields.append(QgsField("tipo", QVariant.String))
+
+        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT, context, fields, geometry_type, camada_dia_1.sourceCrs())
+
+        dict_dia_1 = {feat[chave_primaria]: feat for feat in camada_dia_1.getFeatures()}
+        dict_dia_2 = {feat[chave_primaria]: feat for feat in camada_dia_2.getFeatures()}
+
+        for key in dict_dia_1.keys() - dict_dia_2.keys():
+            new_feat = QgsFeature(fields)
+            new_feat.setGeometry(dict_dia_1[key].geometry())
+            new_feat.setAttribute(chave_primaria, key)
+            new_feat.setAttribute("tipo", "removida")
+            sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
+
+        for key in dict_dia_2.keys() - dict_dia_1.keys():
+            new_feat = QgsFeature(fields)
+            new_feat.setGeometry(dict_dia_2[key].geometry())
+            new_feat.setAttribute(chave_primaria, key)
+            new_feat.setAttribute("tipo", "adicionada")
+            sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
+
+        for key in dict_dia_1.keys() & dict_dia_2.keys():
+            feat_dia_1 = dict_dia_1[key]
+            feat_dia_2 = dict_dia_2[key]
+            for field in feat_dia_1.fields().names():
+                if field not in campos_ignorados:
+                    if feat_dia_1[field] != feat_dia_2[field]:
+                        new_feat = QgsFeature(fields)
+                        new_feat.setGeometry(feat_dia_2.geometry())
+                        new_feat.setAttribute(chave_primaria, key)
+                        new_feat.setAttribute("tipo", "modificada")
+                        sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
+                        break
+
+        return {self.OUTPUT: dest_id}
+
+    
     ##Essa parte é para colocarmos os processings utilizados na solução
     
     #processing.run("native:pointstopath", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj3/dados_projeto3_2024.gpkg|layername=tracker','CLOSE_PATH':False,'ORDER_EXPRESSION':'"creation_time"','NATURAL_SORT':False,'GROUP_EXPRESSION':'','OUTPUT':'TEMPORARY_OUTPUT'})
@@ -204,7 +251,21 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
                 feedback = feedback
             )["OUTPUT"]
             return output
+    
+    #processing.run("native:buffer", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj3/dados_projeto3_2024.gpkg|layername=tracker','DISTANCE':10,'SEGMENTS':5,'END_CAP_STYLE':0,'JOIN_STYLE':0,'MITER_LIMIT':2,'DISSOLVE':False,'OUTPUT':'TEMPORARY_OUTPUT'})
 
+    def buffer(self, camada:QgsVectorLayer, valor: float, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
+        output = processing.run(
+            "native:buffer",
+            {
+                "INPUT": camada,
+                "DISTANCE": valor,
+                "OUTPUT": "memory:"
+            },
+            context=context,
+            feedback = feedback
+        )["OUTPUT"]
+        return output   
 
 
     def name(self):
