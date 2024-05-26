@@ -46,12 +46,14 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingException,
                        QgsField,
                        QgsFields,
-                       QgsSpatialIndex
+                       QgsWkbTypes,
+                       QgsGeometry
                         )
 from PyQt5.QtCore import QVariant
 from qgis import processing
 
-class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
+
+class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
     creates a new identical one.
@@ -77,7 +79,7 @@ class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
     CAMADA_DIA_2 = "CAMADA_DIA_2"
     OUTPUT = "OUTPUT"
 
-    def initAlgorithm(self, config):
+    def initAlgorithm(self, config=None):
         """
         Here we define the inputs and output of the algorithm, along
         with some other properties.
@@ -112,7 +114,7 @@ class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.TOLERANCIA, 
-                self.tr("Insira a distância de tolerância entre o caminho percorrido e as mudanças (em graus)"),
+                self.tr("Insira a distância de tolerância entre o caminho percorrido e as mudanças (em metros)"),
                 type=QgsProcessingParameterNumber.Double
                 )
         )
@@ -136,14 +138,6 @@ class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
                 optional=True
             )
         )    
-
-        # We add a feature sink in which to store our processed features (this
-        # usually takes the form of a newly created vector layer when the
-        # algorithm is run in QGIS).
-
-        # Output layers
-
-        ##tem que ter uma logica a depender da camada de entrada, se a camada dos dias for ponto, o output tem que ser ponto, e por aí vai, acho que isso vamos ajeitar no processamento, mas só colocando aqui para lembrar
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
@@ -181,102 +175,80 @@ class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
 
         # Buffer em torno da linha percorrida (GPS)
         linha_gps_buffer = self.buffer(linha_gps_camada, tol, context, feedback)
-        linha_gps_buffer = next(linha_gps_buffer.getFeatures()).geometry()
-
-        # Lista para armazenar os IDs das features fora do limite de tolerância
-        ids_fora_do_limite = set()
-
-        # Iterar sobre os features da camada do dia 2
-        for feat_dia_2 in camada_dia_2.getFeatures():
-            # Verificar se o buffer do feature do dia 2 intersecta com o buffer da linha GPS
-            if feat_dia_2.geometry().intersects(linha_gps_buffer.geometry()):
-                # Adicionar o ID à lista de IDs dentro do limite de tolerância
-                ids_fora_do_limite.add(feat_dia_2[chave_primaria])
-
-        # Iterar sobre os features da camada do dia 1
-        for feat_dia_1 in camada_dia_1.getFeatures():
-            # Verificar se o buffer do feature do dia 1 intersecta com o buffer da linha GPS
-            if feat_dia_1.geometry().intersects(linha_gps_buffer.geometry()):
-                # Adicionar o ID à lista de IDs dentro do limite de tolerância
-                ids_fora_do_limite.add(feat_dia_1[chave_primaria])
 
         currentStep += 1
         if multiStepFeedback is not None:
             multiStepFeedback.setCurrentStep(currentStep)
             multiStepFeedback.pushInfo(
-                self.tr("Proximo passo...")
+                self.tr("Próximo passo...")
             )
-
 
         geometry_type = camada_dia_1.wkbType()
 
         fields = QgsFields()
         fields.append(QgsField(chave_primaria, QVariant.String))
         fields.append(QgsField("tipo", QVariant.String))
+        fields.append(QgsField("atributo_modificado", QVariant.String))  # Campo para atributo modificado
 
         (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT, context, fields, geometry_type, camada_dia_1.sourceCrs())
 
         dict_dia_1 = {feat[chave_primaria]: feat for feat in camada_dia_1.getFeatures()}
         dict_dia_2 = {feat[chave_primaria]: feat for feat in camada_dia_2.getFeatures()}
 
-        # Iterar sobre os IDs fora do limite de tolerância
-        for key in ids_fora_do_limite:
-            if key in dict_dia_1:
-                new_feat = QgsFeature(fields)
-                new_feat.setGeometry(dict_dia_1[key].geometry())
-                new_feat.setAttribute(chave_primaria, key)
-                new_feat.setAttribute("tipo", "removida")
+        for key in dict_dia_1.keys() - dict_dia_2.keys():
+            new_feat = QgsFeature(fields)
+            new_feat.setGeometry(dict_dia_1[key].geometry())
+            new_feat.setAttribute(chave_primaria, key)
+            new_feat.setAttribute("tipo", "removida")
+            new_feat.setAttribute("atributo_modificado", "")  # Nenhum atributo modificado
+            if self.is_outside_tolerance(dict_dia_1[key].geometry(), linha_gps_buffer):
+                feedback.pushInfo(f"Feição removida fora da tolerância: {key}")
                 sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
 
-            if key in dict_dia_2:
-                new_feat = QgsFeature(fields)
-                new_feat.setGeometry(dict_dia_2[key].geometry())
-                new_feat.setAttribute(chave_primaria, key)
-                new_feat.setAttribute("tipo", "adicionada")
+        for key in dict_dia_2.keys() - dict_dia_1.keys():
+            new_feat = QgsFeature(fields)
+            new_feat.setGeometry(dict_dia_2[key].geometry())
+            new_feat.setAttribute(chave_primaria, key)
+            new_feat.setAttribute("tipo", "adicionada")
+            new_feat.setAttribute("atributo_modificado", "")  # Nenhum atributo modificado
+            if self.is_outside_tolerance(dict_dia_2[key].geometry(), linha_gps_buffer):
+                feedback.pushInfo(f"Feição adicionada fora da tolerância: {key}")
                 sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
 
-            # Verificar se o ID também está na camada do dia 2
-            # Se estiver, verificar se houve modificação
-            if key in dict_dia_1 and key in dict_dia_2:
-                feat_dia_1 = dict_dia_1[key]
-                feat_dia_2 = dict_dia_2[key]
-                for field in feat_dia_1.fields().names():
-                    # Verificar se o campo não está na lista de campos ignorados
-                    if field not in campos_ignorados:
-                        # Verificar se houve modificação no campo
-                        if feat_dia_1[field] != feat_dia_2[field]:
-                            new_feat = QgsFeature(fields)
-                            new_feat.setGeometry(feat_dia_2.geometry())
-                            new_feat.setAttribute(chave_primaria, key)
-                            new_feat.setAttribute("tipo", "modificada")
+        for key in dict_dia_1.keys() & dict_dia_2.keys():
+            feat_dia_1 = dict_dia_1[key]
+            feat_dia_2 = dict_dia_2[key]
+            for field in feat_dia_1.fields().names():
+                if field not in campos_ignorados:
+                    if feat_dia_1[field] != feat_dia_2[field]:
+                        new_feat = QgsFeature(fields)
+                        new_feat.setGeometry(feat_dia_2.geometry())
+                        new_feat.setAttribute(chave_primaria, key)
+                        new_feat.setAttribute("tipo", "modificada")
+                        new_feat.setAttribute("atributo_modificado", field)  # Atributo modificado
+                        if self.is_outside_tolerance(feat_dia_2.geometry(), linha_gps_buffer):
+                            feedback.pushInfo(f"Feição modificada fora da tolerância: {key}, Atributo: {field}")
                             sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
-                            break
+                        break
 
         return {self.OUTPUT: dest_id}
 
-    
-    ##Essa parte é para colocarmos os processings utilizados na solução
-    
-    #processing.run("native:pointstopath", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj3/dados_projeto3_2024.gpkg|layername=tracker','CLOSE_PATH':False,'ORDER_EXPRESSION':'"creation_time"','NATURAL_SORT':False,'GROUP_EXPRESSION':'','OUTPUT':'TEMPORARY_OUTPUT'})
-    
     def pointstopath(self, camada: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
-            output = processing.run(
-                "native:pointstopath",
-                {
-                    "INPUT": camada,
-                    "CLOSE_PATH": False,
-                    "ORDER_EXPRESSION":'"creation_time"',
-                    "NATURAL_SORT": False,
-                    "GROUP_EXPRESSION":'',
-                    "OUTPUT": "memory:"
-                },
-                context=context,
-                feedback = feedback
-            )["OUTPUT"]
-            return output
+        output = processing.run(
+            "native:pointstopath",
+            {
+                "INPUT": camada,
+                "CLOSE_PATH": False,
+                "ORDER_EXPRESSION":'"creation_time"',
+                "NATURAL_SORT": False,
+                "GROUP_EXPRESSION":'',
+                "OUTPUT": "memory:"
+            },
+            context=context,
+            feedback = feedback
+        )["OUTPUT"]
+        return output
     
-    #processing.run("native:buffer", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj3/dados_projeto3_2024.gpkg|layername=tracker','DISTANCE':10,'SEGMENTS':5,'END_CAP_STYLE':0,'JOIN_STYLE':0,'MITER_LIMIT':2,'DISSOLVE':False,'OUTPUT':'TEMPORARY_OUTPUT'})
-
     def buffer(self, camada:QgsVectorLayer, valor: float, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
         output = processing.run(
             "native:buffer",
@@ -289,7 +261,15 @@ class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
             feedback = feedback
         )["OUTPUT"]
         return output   
-    
+
+    def is_outside_tolerance(self, geom, buffer_layer):
+        """Check if the geometry is outside the tolerance (buffer)."""
+        for feature in buffer_layer.getFeatures():
+            buffer_geom = feature.geometry()
+            if geom.within(buffer_geom):
+                return False
+        return True
+
     def name(self):
         """
         Returns the algorithm name, used for identifying the algorithm. This
@@ -298,7 +278,7 @@ class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'Solução complementar do projeto 3'
+        return 'solucao_do_projeto_3'
 
     def displayName(self):
         """
@@ -322,10 +302,10 @@ class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
         contain lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'Projeto 3'
+        return 'projeto_3'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
 
     def createInstance(self):
-        return ReambulacaoComplementarAlgorithm()
+        return ReambulacaoAlgorithm()
