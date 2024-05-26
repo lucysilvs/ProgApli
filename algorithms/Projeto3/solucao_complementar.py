@@ -85,8 +85,6 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         with some other properties.
         """
 
-        # We add the input vector features source. It can have any kind of
-        # geometry.
         self.addParameter(
             QgsProcessingParameterVectorLayer(
                 self.PONTOS_GPS,
@@ -116,7 +114,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
                 self.TOLERANCIA, 
                 self.tr("Insira a distância de tolerância entre o caminho percorrido e as mudanças (em metros)"),
                 type=QgsProcessingParameterNumber.Double
-                )
+            )
         )
 
         self.addParameter(
@@ -159,16 +157,9 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
             raise QgsProcessingException(self.tr("As camadas do dia 1 e do dia 2 devem ter o mesmo tipo de geometria."))
 
         currentStep = 0
-        multiStepFeedback = (
-            QgsProcessingMultiStepFeedback(3, feedback)
-            if feedback is not None
-            else None
-        )     
-        if multiStepFeedback is not None:
-            multiStepFeedback.setCurrentStep(currentStep)
-            multiStepFeedback.pushInfo(
-                self.tr("Gerando uma linha cujos vértices são os pontos da camada de pontos GPS, seguindo a ordem da data de criação...")
-            )
+        multiStepFeedback = QgsProcessingMultiStepFeedback(3, feedback)
+        multiStepFeedback.setCurrentStep(currentStep)
+        multiStepFeedback.pushInfo(self.tr("Gerando uma linha cujos vértices são os pontos da camada de pontos GPS, seguindo a ordem da data de criação..."))
 
         # Converter pontos GPS para uma linha
         linha_gps_camada = self.pointstopath(pontos_gps_camada, context, feedback)
@@ -177,11 +168,8 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         linha_gps_buffer = self.buffer(linha_gps_camada, tol, context, feedback)
 
         currentStep += 1
-        if multiStepFeedback is not None:
-            multiStepFeedback.setCurrentStep(currentStep)
-            multiStepFeedback.pushInfo(
-                self.tr("Próximo passo...")
-            )
+        multiStepFeedback.setCurrentStep(currentStep)
+        multiStepFeedback.pushInfo(self.tr("Próximo passo..."))
 
         geometry_type = camada_dia_1.wkbType()
 
@@ -195,25 +183,21 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         dict_dia_1 = {feat[chave_primaria]: feat for feat in camada_dia_1.getFeatures()}
         dict_dia_2 = {feat[chave_primaria]: feat for feat in camada_dia_2.getFeatures()}
 
-        for key in dict_dia_1.keys() - dict_dia_2.keys():
+        def add_feature(feat, tipo, atributo_modificado):
             new_feat = QgsFeature(fields)
-            new_feat.setGeometry(dict_dia_1[key].geometry())
-            new_feat.setAttribute(chave_primaria, key)
-            new_feat.setAttribute("tipo", "removida")
-            new_feat.setAttribute("atributo_modificado", "")  # Nenhum atributo modificado
-            if self.is_outside_tolerance(dict_dia_1[key].geometry(), linha_gps_buffer):
-                feedback.pushInfo(f"Feição removida fora da tolerância: {key}")
+            new_feat.setGeometry(feat.geometry())
+            new_feat.setAttribute(chave_primaria, feat[chave_primaria])
+            new_feat.setAttribute("tipo", tipo)
+            new_feat.setAttribute("atributo_modificado", atributo_modificado)
+            if self.is_outside_tolerance(feat.geometry(), linha_gps_buffer):
+                feedback.pushInfo(f"Feição {tipo} fora da tolerância: {feat[chave_primaria]}, Atributo: {atributo_modificado}")
                 sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
 
+        for key in dict_dia_1.keys() - dict_dia_2.keys():
+            add_feature(dict_dia_1[key], "removida", "")
+
         for key in dict_dia_2.keys() - dict_dia_1.keys():
-            new_feat = QgsFeature(fields)
-            new_feat.setGeometry(dict_dia_2[key].geometry())
-            new_feat.setAttribute(chave_primaria, key)
-            new_feat.setAttribute("tipo", "adicionada")
-            new_feat.setAttribute("atributo_modificado", "")  # Nenhum atributo modificado
-            if self.is_outside_tolerance(dict_dia_2[key].geometry(), linha_gps_buffer):
-                feedback.pushInfo(f"Feição adicionada fora da tolerância: {key}")
-                sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
+            add_feature(dict_dia_2[key], "adicionada", "")
 
         for key in dict_dia_1.keys() & dict_dia_2.keys():
             feat_dia_1 = dict_dia_1[key]
@@ -221,14 +205,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
             for field in feat_dia_1.fields().names():
                 if field not in campos_ignorados:
                     if feat_dia_1[field] != feat_dia_2[field]:
-                        new_feat = QgsFeature(fields)
-                        new_feat.setGeometry(feat_dia_2.geometry())
-                        new_feat.setAttribute(chave_primaria, key)
-                        new_feat.setAttribute("tipo", "modificada")
-                        new_feat.setAttribute("atributo_modificado", field)  # Atributo modificado
-                        if self.is_outside_tolerance(feat_dia_2.geometry(), linha_gps_buffer):
-                            feedback.pushInfo(f"Feição modificada fora da tolerância: {key}, Atributo: {field}")
-                            sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
+                        add_feature(feat_dia_2, "modificada", field)
                         break
 
         return {self.OUTPUT: dest_id}
@@ -239,9 +216,9 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
             {
                 "INPUT": camada,
                 "CLOSE_PATH": False,
-                "ORDER_EXPRESSION":'"creation_time"',
+                "ORDER_EXPRESSION": '"creation_time"',
                 "NATURAL_SORT": False,
-                "GROUP_EXPRESSION":'',
+                "GROUP_EXPRESSION": '',
                 "OUTPUT": "memory:"
             },
             context=context,
