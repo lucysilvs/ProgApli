@@ -144,7 +144,6 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         )    
     
     def processAlgorithm(self, parameters, context, feedback):
-        # Retrieve parameters
         pontos_gps_camada = self.parameterAsVectorLayer(parameters, self.PONTOS_GPS, context)
         camada_dia_1 = self.parameterAsVectorLayer(parameters, self.CAMADA_DIA_1, context)
         camada_dia_2 = self.parameterAsVectorLayer(parameters, self.CAMADA_DIA_2, context)
@@ -255,7 +254,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'solucao_do_projeto_3'
+        return 'Solução complementar do projeto 3'
 
     def displayName(self):
         """
@@ -279,10 +278,10 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         contain lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'projeto_3'
+        return 'Projeto 3'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
 
     def createInstance(self):
-        return ReambulacaoAlgorithm()
+        return ReambulacaoComplementarAlgorithm()
