@@ -31,465 +31,142 @@ __copyright__ = '(C) 2024 by Grupo 2'
 __revision__ = '$Format:%H$'
 
 from qgis.PyQt.QtCore import QCoreApplication
-from qgis.core import (QgsProcessing,
-                       QgsProcessingAlgorithm,
-                       QgsProcessingParameterVectorLayer,
-                       QgsProcessingParameterEnum,
-                       QgsProcessingParameterRasterLayer,
-                       QgsVectorLayer,
-                       QgsProcessingException,
-                       QgsFeatureRequest,
-                       QgsProject,
-                       QgsFeature,
-                       QgsProcessingMultiStepFeedback,
-                       QgsProcessingParameterVectorDestination,
-                       QgsProcessingContext,
-                       QgsFeedback
-                        )
+from qgis.core import (
+    QgsProcessing,
+    QgsProcessingAlgorithm,
+    QgsProcessingParameterVectorLayer,
+    QgsProcessingParameterEnum,
+    QgsProcessingParameterRasterLayer,
+    QgsProcessingParameterFeatureSink,
+    QgsProcessingException,
+    QgsFeatureRequest,
+    QgsProject,
+    QgsFeature,
+    QgsProcessingMultiStepFeedback,
+    QgsProcessingParameterVectorDestination,
+    QgsProcessingContext,
+    QgsFeedback,
+    QgsFields,
+    QgsField,
+    QgsFeature,
+    QgsGeometry,
+    QgsWkbTypes,
+    QgsPointXY
+)
 from qgis import processing
+from qgis.PyQt.QtCore import QVariant
 
 class DadosMDTComplementarAlgorithm(QgsProcessingAlgorithm):
-    """
-    This is an example algorithm that takes a vector layer and
-    creates a new identical one.
-
-    It is meant to be used as an example of how to create your own
-    algorithms and explain methods and variables used to do it. An
-    algorithm like this will be available in all elements, and there
-    is not need for additional work.
-
-    All Processing algorithms should extend the QgsProcessingAlgorithm
-    class.
-    """
-
-    # Constants used to refer to parameters and outputs. They will be
-    # used when calling the algorithm from another algorithm, or when
-    # calling from the QGIS console.
-
-    CURVA_NIVEL = 'CURVA_NIVEL'
+    # Definindo constantes para os parâmetros
     MDT = "MDT"
-    PISTA_POUSO_PONTO = "PISTA_POUSO_PONTO"
-    PISTA_POUSO_LINHA = "PISTA_POUSO_LINHA"
-    PISTA_POUSO_AREA = "PISTA_POUSO_AREA"
-    ESCALA = "ESCALA"
-    CURVA_NIVEL_OUTPUT = "CURVA_NIVEL_OUTPUT"
-    PISTA_POUSO_PONTO_OUTPUT = "PISTA_POUSO_PONTO_OUTPUT"
-    PISTA_POUSO_LINHA_OUTPUT = "PISTA_POUSO_LINHA_OUTPUT"
-    PISTA_POUSO_AREA_OUTPUT = "PISTA_POUSO_AREA_OUTPUT"
-    AREA_PONTO_COTADO = "AREA_PONTO_COTADO"
-    PONTOS_COTADOS_OUTPUT = "PONTOS_COTADOS_OUTPUT"
+    INPUT_CURVAS = "INPUT_CURVAS"
+    INPUT_MOLDURA = "INPUT_MOLDURA"
+    OUTPUT = "OUTPUT"
 
-    def initAlgorithm(self, config):
-        """
-        Here we define the inputs and output of the algorithm, along
-        with some other properties.
-        """
-
-        # We add the input vector features source. It can have any kind of
-        # geometry.
+    def initAlgorithm(self, config=None):
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
+                self.INPUT_CURVAS,
+                self.tr("Curvas de Nível"),
+                [QgsProcessing.TypeVectorLine]
+            )
+        )
         self.addParameter(
             QgsProcessingParameterRasterLayer(
                 self.MDT,
-                self.tr("Insira a camada com o MDT"),
+                self.tr("Modelo Digital de Terreno (MDT)")
             )
         )
-
         self.addParameter(
             QgsProcessingParameterVectorLayer(
-                self.CURVA_NIVEL,
-                self.tr("Insira a camada de curva de nível"),
-                types=[QgsProcessing.TypeVectorLine]
+                self.INPUT_MOLDURA,
+                self.tr("Moldura para Análise"),
+                [QgsProcessing.TypeVectorPolygon]
             )
         )
-
         self.addParameter(
-            QgsProcessingParameterVectorLayer(
-                self.PISTA_POUSO_PONTO,
-                self.tr("Insira a camada de pista de pouso (ponto)"),
-                types=[QgsProcessing.TypeVectorPoint]
-            )
-        )
-
-
-        self.addParameter(
-            QgsProcessingParameterVectorLayer(
-                self.PISTA_POUSO_LINHA,
-                self.tr("Insira a camada de pista de pouso (linha)"),
-                types=[QgsProcessing.TypeVectorLine]
-            )
-        )
-
-
-        self.addParameter(
-            QgsProcessingParameterVectorLayer(
-                self.PISTA_POUSO_AREA,
-                self.tr("Insira a camada de pista de pouso (área)"),
-                types=[QgsProcessing.TypeVectorPolygon]
-            )
-        )
-
-        # Adiciona a ComboBox de escalas
-        self.addParameter(
-            QgsProcessingParameterEnum(
-                name=self.ESCALA,
-                description=self.tr("Selecione a escala"),
-                options=['1:25.000', '1:50.000', '1:100.000', '1:250.000']
-            )
-        )
-
-        self.addParameter(
-            QgsProcessingParameterVectorLayer(
-                self.AREA_PONTO_COTADO,
-                self.tr("Insira o quadrado de área para recorte de camadas"),
-                types=[QgsProcessing.TypeVectorPolygon]
-            )
-        )
-
-        # We add a feature sink in which to store our processed features (this
-        # usually takes the form of a newly created vector layer when the
-        # algorithm is run in QGIS).
-
-        # Output layers
-        self.addParameter(
-            QgsProcessingParameterVectorDestination(
-                self.CURVA_NIVEL_OUTPUT,
-                self.tr("Camada de Curvas de Nível Processada")
-            )
-        )
-
-        self.addParameter(
-            QgsProcessingParameterVectorDestination(
-                self.PISTA_POUSO_PONTO_OUTPUT,
-                self.tr("Camada ponto pista de pouso com altitude preenchida")
-            )
-        )
-
-        self.addParameter(
-            QgsProcessingParameterVectorDestination(
-                self.PISTA_POUSO_LINHA_OUTPUT,
-                self.tr("Camada linha pista de pouso com altitude preenchida")
-            )
-        )
-
-        self.addParameter(
-            QgsProcessingParameterVectorDestination(
-                self.PISTA_POUSO_AREA_OUTPUT,
-                self.tr("Camada área pista de pouso com altitude preenchida")
-            )
-        )
-
-        self.addParameter(
-            QgsProcessingParameterVectorDestination(
-                self.PONTOS_COTADOS_OUTPUT,
-                self.tr("Camada ponto de pontos cotados")
+            QgsProcessingParameterFeatureSink(
+                self.OUTPUT,
+                self.tr("Pontos de Elevação Máxima")
             )
         )
 
     def processAlgorithm(self, parameters, context, feedback):
-        """
-        Here is where the processing itself takes place.
-        """
-        mdt_camada = self.parameterAsRasterLayer(parameters, self.MDT, context)
-        curvas_nivel_camada = self.parameterAsVectorLayer(parameters, self.CURVA_NIVEL, context)
-        pista_pouso_ponto_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_PONTO, context)
-        pista_pouso_linha_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_LINHA, context)
-        pista_pouso_area_camada = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_AREA, context)
-        escala = self.parameterAsString(parameters, self.ESCALA, context)
-        camada_curva_nivel_saida = self.parameterAsVectorLayer(parameters, self.CURVA_NIVEL_OUTPUT, context)
-        pista_pouso_ponto_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_PONTO_OUTPUT, context)
-        pista_pouso_linha_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_LINHA_OUTPUT, context)
-        pista_pouso_area_output = self.parameterAsVectorLayer(parameters, self.PISTA_POUSO_AREA_OUTPUT, context)
-        area_ponto_cotado = self.parameterAsVectorLayer(parameters, self.AREA_PONTO_COTADO, context)
-        pontos_cotados_output = self.parameterAsVectorLayer(parameters, self.PONTOS_COTADOS_OUTPUT, context)
+        curvas_nivel = self.parameterAsSource(parameters, self.INPUT_CURVAS, context)
+        mdt_layer = self.parameterAsRasterLayer(parameters, self.MDT, context)
+        moldura = self.parameterAsVectorLayer(parameters, self.INPUT_MOLDURA, context)
 
-        currentStep = 0
-        multiStepFeedback = (
-            QgsProcessingMultiStepFeedback(3, feedback)
-            if feedback is not None
-            else None
+        fields = QgsFields()
+        fields.append(QgsField("cota", QVariant.Double))
+
+        (sink, dest_id) = self.parameterAsSink(
+            parameters,
+            self.OUTPUT,
+            context,
+            fields,
+            QgsWkbTypes.Point,
+            curvas_nivel.sourceCrs()
         )
-        if multiStepFeedback is not None:
-            multiStepFeedback.setCurrentStep(currentStep)
-            multiStepFeedback.pushInfo(
-                self.tr("Gerando nova camada, apenas com as curvas de nível adequadas à escala e com divisão entre normal e mestra...")
-            )
 
-        # Mapear índices para valores de escala
-        indice_escala = {0: '1:25.000', 1: '1:50.000', 2: '1:100.000', 3: '1:250.000'}
+        moldura_geom = [f.geometry() for f in moldura.getFeatures()][0] if moldura else None
+        total = 100.0 / curvas_nivel.featureCount() if curvas_nivel.featureCount() else 0
 
-        # Recuperar o índice selecionado
-        indice_selecionado = parameters[self.ESCALA]
+        for current, curva in enumerate(curvas_nivel.getFeatures()):
+            if feedback.isCanceled():
+                break
 
-        # Recuperar o valor da escala correspondente ao índice selecionado
-        if indice_selecionado in indice_escala:
-            escala = indice_escala[indice_selecionado]
-        else:
-            # Índice inválido
-            raise QgsProcessingException("Índice de escala inválido selecionado: {}".format(indice_selecionado))
+            if moldura_geom and not moldura_geom.intersects(curva.geometry()):
+                continue  # Skip curves outside the frame
 
-        # Determinar a equidistância adequada com base na escala selecionada
-        if escala == '1:25.000':
-            equidistancia = 10
-            multiplo_cota = 5 * (equidistancia)
-        elif escala == '1:50.000':
-            equidistancia = 20
-            multiplo_cota = 5 * (equidistancia)
-        elif escala == '1:100.000':
-            equidistancia = 50
-            multiplo_cota = 5 * (equidistancia)
-        elif escala == '1:250.000':
-            equidistancia = 100
-            multiplo_cota = 5 * (equidistancia)
-        else:
-            # Escala inválida
-            raise QgsProcessingException("Escala inválida selecionada: {}".format(escala))
-        # Obter os valores mínimo e máximo da coluna de cota da tabela de atributos
-        idx_cota = curvas_nivel_camada.fields().lookupField('cota')  # Obtém o índice do campo 'cota'
-        max_cota =  curvas_nivel_camada.maximumValue(idx_cota)
+            if self.is_curva_isolada(curva, curvas_nivel):
+                highest_point, highest_value = self.find_highest_point(curva.geometry(), mdt_layer)
+                if highest_point:
+                    feat = QgsFeature(fields)
+                    feat.setGeometry(QgsGeometry.fromPointXY(highest_point))
+                    feat.setAttributes([round(highest_value, 1)])  # Round elevation to one decimal place
+                    sink.addFeature(feat, QgsFeatureSink.FastInsert)
 
-        # Criar lista de valores de cota com base na equidistância
-        valores_cota = list(range(0, max_cota + 1, equidistancia))
+            feedback.setProgress(int(current * total))
 
-        # Filtrar os recursos da camada de curva de nível para manter apenas os valores de cota adequados
-        expression = "\"cota\" IN ({})".format(','.join(map(str, valores_cota)))
-        curvas_nivel_filtradas = curvas_nivel_camada.getFeatures(QgsFeatureRequest().setFilterExpression(expression))
+        return {self.OUTPUT: dest_id}
 
-        # Criar camada de curva de nível filtrada
-        nova_camada = QgsVectorLayer("LineString?crs={}".format(curvas_nivel_camada.crs().authid()), "Curvas de Nível", "memory")
-        provider = nova_camada.dataProvider()
+    def is_curva_isolada(self, curva, curvas_nivel):
+        geom_curva = curva.geometry().buffer(0.001, 10)  # Small buffer to ensure no touching lines are considered inside
+        for other_curva in curvas_nivel.getFeatures():
+            if other_curva.id() != curva.id() and geom_curva.contains(other_curva.geometry()):
+                return False
+        return True
 
-        # Adicionar atributos à camada
-        fields = curvas_nivel_camada.fields().toList()
-        provider.addAttributes(fields)
-        nova_camada.updateFields()
+    def find_highest_point(self, geometry, mdt_layer):
+        highest_point = None
+        highest_value = float('-inf')
+        bbox = geometry.boundingBox()
+        step = max(bbox.width(), bbox.height()) / 50  # Dynamic step size based on the size of the bounding box
 
-        # Adicionar recursos filtrados à camada
-        for feature in curvas_nivel_filtradas:
-            # Adicionar o recurso à camada
-            nova_feature = QgsFeature(feature)
-            # Verificar se o valor de cota é um múltiplo de multiplo_cota
-            if nova_feature['cota'] % multiplo_cota == 0:
-                # Se for, definir o valor de índice como 1
-                nova_feature.setAttribute('indice', 1)
-            else:
-                # Caso contrário, definir o valor de índice como 2
-                nova_feature.setAttribute('indice', 2)
-            provider.addFeature(nova_feature)
-
-        camada_curva_nivel_saida = nova_camada
-
-        # Adicionar camada resultante ao projeto do QGIS
-        QgsProject.instance().addMapLayer(camada_curva_nivel_saida)
-
-        currentStep += 1
-        if multiStepFeedback is not None:
-            multiStepFeedback.setCurrentStep(currentStep)
-            multiStepFeedback.pushInfo(
-                self.tr("Amostrando camada raster para obter altitude das pistas de pouso...")
-            )
-
-        ####################### CAMADA PONTO DA PISTA DE POUSO #######################
-        pista_pouso_ponto_output = self.processar_camada(pista_pouso_ponto_camada, mdt_camada, context)
-        # Adicionar camada resultante ao projeto do QGIS
-        QgsProject.instance().addMapLayer(pista_pouso_ponto_output)
-        pista_pouso_ponto_output.setName('pista_pouso_ponto_output')
-
-        ####################### CAMADA LINHA DA PISTA DE POUSO #######################
-
-        pista_pouso_linha_output = self.centroids(pista_pouso_linha_camada, context)
-        pista_pouso_linha_output = self.processar_camada(pista_pouso_linha_output, mdt_camada, context)
-        # Adicionar camada resultante ao projeto do QGIS
-        QgsProject.instance().addMapLayer(pista_pouso_linha_output)
-        pista_pouso_linha_output.setName('pista_pouso_linha_output')
-
-        ####################### CAMADA AREA DA PISTA DE POUSO #######################
-
-        pista_pouso_area_output = self.centroids(pista_pouso_area_camada, context)
-        pista_pouso_area_output = self.processar_camada(pista_pouso_area_output, mdt_camada, context)
-        # Adicionar camada resultante ao projeto do QGIS
-        QgsProject.instance().addMapLayer(pista_pouso_area_output)
-        pista_pouso_area_output.setName('pista_pouso_area_output')
-
-        currentStep += 1
-        if multiStepFeedback is not None:
-            multiStepFeedback.setCurrentStep(currentStep)
-            multiStepFeedback.pushInfo(
-                self.tr("Gerando camadas recortadas para objetivo complementar...")
-            )
-
-        curvas_nivel_camada_recortada = self.clip(camada_curva_nivel_saida,area_ponto_cotado, context)
-        mdt_camada_recotada = self.cliprasterbymasklayer(mdt_camada, area_ponto_cotado,context)
-
-        # Retornar o resultado do algoritmo
-        return {self.CURVA_NIVEL_OUTPUT: camada_curva_nivel_saida,
-                self.PISTA_POUSO_PONTO_OUTPUT: pista_pouso_ponto_output,
-                self.PISTA_POUSO_LINHA_OUTPUT: pista_pouso_linha_output,
-                self.PISTA_POUSO_AREA_OUTPUT: pista_pouso_area_output,
-                self.PONTOS_COTADOS_OUTPUT: pontos_cotados_output}
-
-    #processing.run("native:rastersampling", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/dados_projeto2_2024.gpkg|layername=infra_pista_pouso_p','RASTERCOPY':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/MDT_Projeto2.tif','COLUMN_PREFIX':'SAMPLE_','OUTPUT':'TEMPORARY_OUTPUT'})
-
-    def rastersampling(self, camada: QgsVectorLayer, camada_raster: str, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
-            output = processing.run(
-                "native:rastersampling",
-                {
-                    "INPUT": camada,
-                    "RASTERCOPY": camada_raster,
-                    'COLUMN_PREFIX':'altitude',
-                    "OUTPUT": "memory:"
-                },
-                context=context,
-                feedback = feedback
-            )["OUTPUT"]
-            return output
-
-    #processing.run("native:deletecolumn", {'INPUT':'memory://MultiPoint?crs=EPSG:4674&field=fid:long(0,0)&field=nome:string(255,0)&field=tipo:integer(0,0)&field=revestimento:integer(0,0)&field=uso_pista:integer(0,0)&field=situacao_fisica:integer(0,0)&field=altitude:double(0,0)&field=altitude1:double(0,0)&uid={b5fb1db1-5908-4297-afe4-70a680417b25}','COLUMN':['altitude'],'OUTPUT':'TEMPORARY_OUTPUT'})
-
-    def deletecolumn(self, camada: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
-            output = processing.run(
-                "native:deletecolumn",
-                {
-                    "INPUT": camada,
-                    "COLUMN": ['altitude'],
-                    "OUTPUT": "memory:"
-                },
-                context=context,
-                feedback = feedback
-            )["OUTPUT"]
-            return output
-
-    #processing.run("native:renametablefield", {'INPUT':'memory://MultiPoint?crs=EPSG:4674&field=fid:long(0,0)&field=nome:string(255,0)&field=tipo:integer(0,0)&field=revestimento:integer(0,0)&field=uso_pista:integer(0,0)&field=situacao_fisica:integer(0,0)&field=altitude1:double(0,0)&uid={3cfc3882-ea41-4fe3-80cd-ca7d23f212e4}','FIELD':'altitude1','NEW_NAME':'altitude','OUTPUT':'TEMPORARY_OUTPUT'})
-
-    def renametablefield(self, camada: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
-            output = processing.run(
-                "native:renametablefield",
-                {
-                    "INPUT": camada,
-                    'FIELD':'altitude1',
-                    'NEW_NAME':'altitude',
-                    "OUTPUT": "memory:"
-                },
-                context=context,
-                feedback = feedback
-            )["OUTPUT"]
-            return output
-
-    #processing.run("native:centroids", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/dados_projeto2_2024.gpkg|layername=infra_pista_pouso_l','ALL_PARTS':False,'OUTPUT':'TEMPORARY_OUTPUT'})
-
-    def centroids(self, camada: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
-            output = processing.run(
-                "native:centroids",
-                {
-                    "INPUT": camada,
-                    "ALL_PARTS": False,
-                    "OUTPUT": "memory:"
-                },
-                context=context,
-                feedback = feedback
-            )["OUTPUT"]
-            return output
-
-    #processing.run("native:clip", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/dados_projeto2_2024.gpkg|layername=elemnat_curva_nivel_l','OVERLAY':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/dados_projeto2_2024.gpkg|layername=area_ponto_cotado','OUTPUT':'TEMPORARY_OUTPUT'})
-
-    def clip(self, camada: QgsVectorLayer, camada_corte: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
-        output = processing.run(
-            "native:clip",
-            {
-                "INPUT": camada,
-                "OVERLAY": camada_corte,
-                "OUTPUT": "memory:"
-            },
-            context=context,
-            feedback = feedback
-        )["OUTPUT"]
-        return output
-
-    #processing.run("gdal:cliprasterbymasklayer", {'INPUT':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/MDT_Projeto2.tif','MASK':'C:/Users/anali/OneDrive/Documentos/prog_apli_docs/proj2/dados_projeto2_2024.gpkg|layername=area_ponto_cotado','SOURCE_CRS':None,'TARGET_CRS':None,'TARGET_EXTENT':None,'NODATA':None,'ALPHA_BAND':False,'CROP_TO_CUTLINE':True,'KEEP_RESOLUTION':False,'SET_RESOLUTION':False,'X_RESOLUTION':None,'Y_RESOLUTION':None,'MULTITHREADING':False,'OPTIONS':'','DATA_TYPE':0,'EXTRA':'','OUTPUT':'TEMPORARY_OUTPUT'})
-
-    def cliprasterbymasklayer(self, camada_raster: str, camada_corte: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
-        output = processing.run(
-            "gdal:cliprasterbymasklayer",
-            {
-                "INPUT": camada_raster,
-                "MASK": camada_corte,
-                "SOURCE_CRS": None,
-                "TARGET_CRS":None,
-                "TARGET_EXTENT":None,
-                "NODATA":None,
-                "ALPHA_BAND":False,
-                "CROP_TO_CUTLINE":True,
-                "KEEP_RESOLUTION":False,
-                "SET_RESOLUTION":False,
-                "X_RESOLUTION":None,
-                "Y_RESOLUTION":None,
-                "MULTITHREADING":False,
-                "OPTIONS":'',
-                "DATA_TYPE":0,
-                "EXTRA":'',
-                "OUTPUT": "memory:"
-            },
-            context=context,
-            feedback = feedback
-        )["OUTPUT"]
-        return output
-
-    def processar_camada(self,camada, mdt_camada, context):
-        # Chama a função rastersampling para obter a camada de pontos pista_pouso_ponto_output
-        output = self.rastersampling(camada, mdt_camada, context)
-
-        # Arredonda os valores da coluna pista_pouso_ponto_output para uma casa decimal
-        for feature in output.getFeatures():
-            # Obter o valor da coluna altitude1
-            valor_amostrado = feature.attribute('altitude1')
-            # Verificar se o valor é do tipo float
-            if isinstance(valor_amostrado, float):
-                # Arredondar para uma casa decimal
-                novo_valor_amostrado = round(valor_amostrado, 1)
-                # Atualizar o valor da coluna altitude1
-                feature.setAttribute('altitude1', novo_valor_amostrado)
-                # Salvar as alterações
-                output.dataProvider().changeAttributeValues({feature.id(): {feature.fieldNameIndex('altitude1'): novo_valor_amostrado}})
-
-        # Remover coluna e renomear campo
-        output = self.deletecolumn(output, context)
-        output = self.renametablefield(output, context)
-
-        # Retornar a camada modificada
-        return output
+        x = bbox.xMinimum()
+        while x <= bbox.xMaximum():
+            y = bbox.yMinimum()
+            while y <= bbox.yMaximum():
+                point = QgsPointXY(x, y)
+                if geometry.contains(point):
+                    value = mdt_layer.dataProvider().sample(point, 1)
+                    if value[0] > highest_value:
+                        highest_point, highest_value = point, value[0]
+                y += step
+            x += step
+        return highest_point, highest_value
 
     def name(self):
-        """
-        Returns the algorithm name, used for identifying the algorithm. This
-        string should be fixed for the algorithm, and must not be localised.
-        The name should be unique within each provider. Names should contain
-        lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
-        return 'Solução complementar do projeto 2'
+        return 'DadosMDTComplementarAlgorithm'
 
     def displayName(self):
-        """
-        Returns the translated algorithm name, which should be used for any
-        user-visible display of the algorithm name.
-        """
         return self.tr(self.name())
 
     def group(self):
-        """
-        Returns the name of the group this algorithm belongs to. This string
-        should be localised.
-        """
-        return self.tr(self.groupId())
+        return self.tr('Your Group Name')
 
     def groupId(self):
-        """
-        Returns the unique ID of the group this algorithm belongs to. This
-        string should be fixed for the algorithm, and must not be localised.
-        The group id should be unique within each provider. Group id should
-        contain lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
-        return 'Projeto 2'
+        return 'your_group_id'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
