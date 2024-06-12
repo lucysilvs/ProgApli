@@ -53,7 +53,7 @@ from PyQt5.QtCore import QVariant
 from qgis import processing
 
 
-class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
+class ReambulacaoComplementarAlgorithm(QgsProcessingAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
     creates a new identical one.
