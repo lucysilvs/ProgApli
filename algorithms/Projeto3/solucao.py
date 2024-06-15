@@ -23,7 +23,7 @@
 """
 
 __author__ = 'Grupo 2'
-__date__ = '2024-05-27'
+__date__ = '2024-04-28'
 __copyright__ = '(C) 2024 by Grupo 2'
 
 # This will get replaced with a git SHA1 when you do a git archive
@@ -46,8 +46,7 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingException,
                        QgsField,
                        QgsFields,
-                       QgsWkbTypes,
-                       QgsGeometry
+                       QgsWkbTypes
                         )
 from PyQt5.QtCore import QVariant
 from qgis import processing
@@ -79,7 +78,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
     CAMADA_DIA_2 = "CAMADA_DIA_2"
     OUTPUT = "OUTPUT"
 
-    def initAlgorithm(self, config=None):
+    def initAlgorithm(self, config):
         """
         Here we define the inputs and output of the algorithm, along
         with some other properties.
@@ -114,7 +113,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.TOLERANCIA, 
-                self.tr("Insira a distância de tolerância entre o caminho percorrido e as mudanças (em metros)"),
+                self.tr("Insira a distância de tolerância entre o caminho percorrido e as mudanças (em graus)"),
                 type=QgsProcessingParameterNumber.Double
                 )
         )
@@ -138,6 +137,14 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
                 optional=True
             )
         )    
+
+        # We add a feature sink in which to store our processed features (this
+        # usually takes the form of a newly created vector layer when the
+        # algorithm is run in QGIS).
+
+        # Output layers
+
+        ##tem que ter uma logica a depender da camada de entrada, se a camada dos dias for ponto, o output tem que ser ponto, e por aí vai, acho que isso vamos ajeitar no processamento, mas só colocando aqui para lembrar
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
@@ -252,7 +259,8 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
             buffer_geom = feature.geometry()
             if geom.within(buffer_geom):
                 return False
-        return True
+        return True  
+
 
     def name(self):
         """
@@ -262,7 +270,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'solucao_do_projeto_3'
+        return 'Solução do projeto 3'
 
     def displayName(self):
         """
@@ -286,7 +294,7 @@ class ReambulacaoAlgorithm(QgsProcessingAlgorithm):
         contain lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'projeto_3'
+        return 'Projeto 3'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
