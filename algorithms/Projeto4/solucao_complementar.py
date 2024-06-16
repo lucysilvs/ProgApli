@@ -30,60 +30,28 @@ __copyright__ = '(C) 2024 by Grupo 2'
 
 __revision__ = '$Format:%H$'
 
-from qgis.PyQt.QtCore import QCoreApplication
+from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (QgsProcessing,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterVectorLayer,
-                       QgsProcessingParameterNumber,
-                       QgsProcessingParameterField,
-                       QgsFeature,
-                       QgsFeatureSink,
-                       QgsProcessingMultiStepFeedback,
-                       QgsProcessingContext,
                        QgsProcessingParameterFeatureSink,
-                       QgsFeedback,
-                       QgsVectorLayer,
-                       QgsProcessingException,
+                       QgsProcessingMultiStepFeedback,
+                       QgsFeatureSink,
+                       QgsFeature,
                        QgsField,
                        QgsFields,
-                       QgsSpatialIndex
-                        )
-from PyQt5.QtCore import QVariant
+                       NULL)
 from qgis import processing
 
 class ValidacaoComplementarAlgorithm(QgsProcessingAlgorithm):
-    """
-    This is an example algorithm that takes a vector layer and
-    creates a new identical one.
-
-    It is meant to be used as an example of how to create your own
-    algorithms and explain methods and variables used to do it. An
-    algorithm like this will be available in all elements, and there
-    is not need for additional work.
-
-    All Processing algorithms should extend the QgsProcessingAlgorithm
-    class.
-    """
-
-    # Constants used to refer to parameters and outputs. They will be
-    # used when calling the algorithm from another algorithm, or when
-    # calling from the QGIS console.
-
     ELEMENTO_VIARIO = "ELEMENTO_VIARIO"
     TRECHO_DRENAGEM = "TRECHO_DRENAGEM"
     VIA_DESLOC = "VIA_DESLOC"
+    MASSA_AGUA = "MASSA_AGUA"
     BARRAGEM = "BARRAGEM"
-    MASSA_DAGUA = "MASSSA_DAGUA"
     OUTPUT = "OUTPUT"
 
-    def initAlgorithm(self, config):
-        """
-        Here we define the inputs and output of the algorithm, along
-        with some other properties.
-        """
-
-        # We add the input vector features source. It can have any kind of
-        # geometry.
+    def initAlgorithm(self, config=None):
         self.addParameter(
             QgsProcessingParameterVectorLayer(
                 self.ELEMENTO_VIARIO,
@@ -110,6 +78,14 @@ class ValidacaoComplementarAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterVectorLayer(
+                self.MASSA_AGUA,
+                self.tr("Insira a camada de massa d'água"),
+                types=[QgsProcessing.TypeVectorPolygon]
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterVectorLayer(
                 self.BARRAGEM,
                 self.tr("Insira a camada de barragem"),
                 types=[QgsProcessing.TypeVectorLine]
@@ -117,178 +93,257 @@ class ValidacaoComplementarAlgorithm(QgsProcessingAlgorithm):
         )
 
         self.addParameter(
-            QgsProcessingParameterVectorLayer(
-                self.MASSA_DAGUA,
-                self.tr("Insira a camada de barragem"),
-                types=[QgsProcessing.TypeVectorPolygon]
-            )
+            QgsProcessingParameterFeatureSink(
+                self.OUTPUT,
+                self.tr("Output"))
         )
-  
 
-        # We add a feature sink in which to store our processed features (this
-        # usually takes the form of a newly created vector layer when the
-        # algorithm is run in QGIS).
-
-        # Output layers
-
-        ##tem que ter uma logica a depender da camada de entrada, se a camada dos dias for ponto, o output tem que ser ponto, e por aí vai, acho que isso vamos ajeitar no processamento, mas só colocando aqui para lembrar
-
-        self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                self.OUTPUT, 
-                self.tr("Output"))
-        )    
-
-        # We add a feature sink in which to store our processed features (this
-        # usually takes the form of a newly created vector layer when the
-        # algorithm is run in QGIS).
-
-        # Output layers
-
-        ##tem que ter uma logica a depender da camada de entrada, se a camada dos dias for ponto, o output tem que ser ponto, e por aí vai, acho que isso vamos ajeitar no processamento, mas só colocando aqui para lembrar
-
-        self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                self.OUTPUT, 
-                self.tr("Output"))
-        )    
-    
     def processAlgorithm(self, parameters, context, feedback):
         elemento_viario_camada = self.parameterAsVectorLayer(parameters, self.ELEMENTO_VIARIO, context)
         trecho_drenagem_camada = self.parameterAsVectorLayer(parameters, self.TRECHO_DRENAGEM, context)
         via_deslocamento_camada = self.parameterAsVectorLayer(parameters, self.VIA_DESLOC, context)
+        massa_agua_camada = self.parameterAsVectorLayer(parameters, self.MASSA_AGUA, context)
         barragem_camada = self.parameterAsVectorLayer(parameters, self.BARRAGEM, context)
-        massa_dagua_camada = self.parameterAsVectorLayer(parameters, self.MASSA_DAGUA, context)
 
-        # Checar se as camadas do dia 1 e do dia 2 tem mesmo tipo de geometria
-        if camada_dia_1.wkbType() != camada_dia_2.wkbType():
-            raise QgsProcessingException(self.tr("As camadas do dia 1 e do dia 2 devem ter o mesmo tipo de geometria."))
+        multiStepFeedback = QgsProcessingMultiStepFeedback(3, feedback) if feedback is not None else None
 
-        currentStep = 0
-        multiStepFeedback = QgsProcessingMultiStepFeedback(3, feedback)
-        multiStepFeedback.setCurrentStep(currentStep)
-        multiStepFeedback.pushInfo(self.tr("Gerando uma linha cujos vértices são os pontos da camada de pontos GPS, seguindo a ordem da data de criação..."))
+        ponto_camadas = [elemento_viario_camada,
+                         self.pointonsurface(trecho_drenagem_camada, context, feedback),
+                         self.pointonsurface(via_deslocamento_camada, context, feedback)]
 
-        # Converter pontos GPS para uma linha
-        linha_gps_camada = self.pointstopath(pontos_gps_camada, context, feedback)
+        campos = QgsFields()
+        campos.append(QgsField('erro', QVariant.String))
+        campos.append(QgsField('id', QVariant.String))
+        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT, context, campos, elemento_viario_camada.wkbType(), elemento_viario_camada.sourceCrs())
 
-        # Buffer em torno da linha percorrida (GPS)
-        linha_gps_buffer = self.buffer(linha_gps_camada, tol, context, feedback)
+        for camada in ponto_camadas:
+            for feature in camada.getFeatures():
+                new_feature = QgsFeature(campos)
+                new_feature.setGeometry(feature.geometry())
+                new_feature['id'] = feature['id']
 
-        currentStep += 1
-        multiStepFeedback.setCurrentStep(currentStep)
-        multiStepFeedback.pushInfo(self.tr("Próximo passo..."))
+                # Rule 1.1: situacao_fisica must be 3 (Construída)
+                if 'situacao_fisica' in feature.fields().names() and feature['situacao_fisica'] != 3:
+                    new_feature['erro'] = "erro na regra 1 - não possui o atributo 'situacao_fisica' preenchido com 3 (Construída)"
+                    sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        geometry_type = camada_dia_1.wkbType()
+                # Rule 1.2: tipo 401 and material_construcao not equal to 97
+                if 'tipo' in feature.fields().names() and feature['tipo'] == 401 and feature['material_construcao'] != 97:
+                    new_feature['erro'] = "erro na regra 1 - 'material_construcao' não é 97 (não aplicável) para 'tipo' 401"
+                    sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        fields = QgsFields()
-        fields.append(QgsField(chave_primaria, QVariant.String))
-        fields.append(QgsField("tipo", QVariant.String))
-        fields.append(QgsField("atributo_modificado", QVariant.String))  # Campo para atributo modificado
+                # Rule 1.3: via de deslocamento or tipo 203 must have nr_pistas <= nr_faixas and both at least 1
+                if camada == ponto_camadas[2] or ('tipo' in feature.fields().names() and feature['tipo'] == 203):
+                    if 'nr_pistas' in feature.fields().names() and 'nr_faixas' in feature.fields().names():
+                        nr_pistas = feature['nr_pistas']
+                        nr_faixas = feature['nr_faixas']
 
-        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT, context, fields, geometry_type, camada_dia_1.sourceCrs())
+                        # Check if nr_pistas and nr_faixas are NULL
+                        if nr_pistas == NULL or nr_faixas == NULL:
+                            new_feature['erro'] = "erro na regra 1 - 'nr_pistas' e 'nr_faixas' devem ser no mínimo 1"
+                            sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+                        else:
+                            nr_pistas = int(nr_pistas)
+                            nr_faixas = int(nr_faixas)
+                            if nr_pistas < 1 or nr_faixas < 1:
+                                new_feature['erro'] = "erro na regra 1 - 'nr_pistas' e 'nr_faixas' devem ser no mínimo 1"
+                                sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+                            elif nr_pistas > nr_faixas:
+                                new_feature['erro'] = "erro na regra 1 - 'nr_pistas' não pode ser maior que 'nr_faixas'"
+                                sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        dict_dia_1 = {feat[chave_primaria]: feat for feat in camada_dia_1.getFeatures()}
-        dict_dia_2 = {feat[chave_primaria]: feat for feat in camada_dia_2.getFeatures()}
+        # Extract vertices and find intersections
+        vertices_trecho_drenagem = self.extractvertices(trecho_drenagem_camada, context, feedback)
+        vertices_via_deslocamento = self.extractvertices(via_deslocamento_camada, context, feedback)
+        intersecoes_camada = self.lineintersections(trecho_drenagem_camada, via_deslocamento_camada, context, feedback)
+        intersecao1 = self.intersection(intersecoes_camada, vertices_trecho_drenagem, context, feedback)
+        intersecao2 = self.intersection(intersecao1, vertices_via_deslocamento, context, feedback)
 
-        def add_feature(feat, tipo, atributo_modificado):
-            new_feat = QgsFeature(fields)
-            new_feat.setGeometry(feat.geometry())
-            new_feat.setAttribute(chave_primaria, feat[chave_primaria])
-            new_feat.setAttribute("tipo", tipo)
-            new_feat.setAttribute("atributo_modificado", atributo_modificado)
-            if self.is_outside_tolerance(feat.geometry(), linha_gps_buffer):
-                feedback.pushInfo(f"Feição {tipo} fora da tolerância: {feat[chave_primaria]}, Atributo: {atributo_modificado}")
-                sink.addFeature(new_feat, QgsFeatureSink.FastInsert)
+        # Identify IDs in intersecoes_camada not in intersecao2
+        intersecao2_ids = {f['id'] for f in intersecao2.getFeatures()}
+        for feature in intersecoes_camada.getFeatures():
+            if feature['id'] not in intersecao2_ids:
+                new_feature = QgsFeature(campos)
+                new_feature.setGeometry(feature.geometry())
+                new_feature['id'] = feature['id']
+                new_feature['erro'] = "erro na regra 2"
+                sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        for key in dict_dia_1.keys() - dict_dia_2.keys():
-            add_feature(dict_dia_1[key], "removida", "")
+        # Regra 3: Interseção com tipos específicos
+        filtered_layer = self.filtrar_tipos(elemento_viario_camada, context, feedback)
+        intersecao3 = self.intersection(intersecoes_camada, filtered_layer, context, feedback)
 
-        for key in dict_dia_2.keys() - dict_dia_1.keys():
-            add_feature(dict_dia_2[key], "adicionada", "")
+        # Identify IDs in intersecoes_camada not in intersecao3
+        intersecao3_ids = {f['id'] for f in intersecao3.getFeatures()}
+        for feature in intersecoes_camada.getFeatures():
+            if feature['id'] not in intersecao3_ids:
+                new_feature = QgsFeature(campos)
+                new_feature.setGeometry(feature.geometry())
+                new_feature['id'] = feature['id']
+                new_feature['erro'] = "erro na regra 3"
+                sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        for key in dict_dia_1.keys() & dict_dia_2.keys():
-            feat_dia_1 = dict_dia_1[key]
-            feat_dia_2 = dict_dia_2[key]
-            for field in feat_dia_1.fields().names():
-                if field not in campos_ignorados:
-                    if feat_dia_1[field] != feat_dia_2[field]:
-                        add_feature(feat_dia_2, "modificada", field)
-                        break
+        # Regra 4: Interseção com tipos e modal_uso específicos
+        filtered_layer2 = self.filtrar_tipos2(elemento_viario_camada, context, feedback)
+        intersecao4 = self.intersection(filtered_layer2, intersecoes_camada, context, feedback)
+
+        # Identify IDs in intersecao4 not in intersecoes_camada
+        intersecao4_ids = {f['id'] for f in intersecao4.getFeatures()}
+        for feature in filtered_layer2.getFeatures():
+            if feature['id'] not in intersecao4_ids:
+                new_feature = QgsFeature(campos)
+                new_feature.setGeometry(feature.geometry())
+                new_feature['id'] = feature['id']
+                new_feature['erro'] = "erro na regra 4"
+                sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+
+        # Regra 5: Garantir que as pontes coincidam com vértices de via de deslocamento e atributos coincidam
+        filtered_layer3 = self.filtrar_tipos3(elemento_viario_camada, context, feedback)
+        for ponte in filtered_layer3.getFeatures():
+            ponte_geom = ponte.geometry().asPoint()
+            coincidentes = [via for via in vertices_via_deslocamento.getFeatures() if via.geometry().asPoint().distance(ponte_geom) < 1e-6]
+
+            if coincidentes:
+                for via in coincidentes:
+                    if (ponte['nr_faixas'] != via['nr_faixas'] or
+                        ponte['nr_pistas'] != via['nr_pistas'] or
+                        ponte['situacao_fisica'] != via['situacao_fisica']):
+                        new_feature = QgsFeature(campos)
+                        new_feature.setGeometry(ponte.geometry())
+                        new_feature['id'] = ponte['id']
+                        new_feature['erro'] = "erro na regra 5 - atributos da ponte não coincidem com a via"
+                        sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+            else:
+                new_feature = QgsFeature(campos)
+                new_feature.setGeometry(ponte.geometry())
+                new_feature['id'] = ponte['id']
+                new_feature['erro'] = "erro na regra 5 - ponte não coincide com um vértice de via de deslocamento"
+                sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+
+        # Regra 6: Verificar se a borda da massa d'água coincide com uma barragem
+        massa_agua = self.pointonsurface(massa_agua_camada, context, feedback)
+        intersecao_massa_barragem = self.intersection(massa_agua, barragem_camada, context, feedback)
+        intersecao_massa_barragem_ids = {f['id'] for f in intersecao_massa_barragem.getFeatures()}
+        for feature in massa_agua.getFeatures():
+            if feature['id'] not in intersecao_massa_barragem_ids:
+                new_feature = QgsFeature(campos)
+                new_feature.setGeometry(feature.geometry())
+                new_feature['id'] = feature['id']
+                new_feature['erro'] = "erro na regra 6 - borda da massa d'água não coincide com uma barragem"
+                sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
         return {self.OUTPUT: dest_id}
 
-    def pointstopath(self, camada: QgsVectorLayer, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
+    def pointonsurface(self, camada, context, feedback):
         output = processing.run(
-            "native:pointstopath",
+            "native:pointonsurface",
             {
                 "INPUT": camada,
-                "CLOSE_PATH": False,
-                "ORDER_EXPRESSION": '"creation_time"',
-                "NATURAL_SORT": False,
-                "GROUP_EXPRESSION": '',
+                "ALL_PARTS": False,
                 "OUTPUT": "memory:"
             },
             context=context,
-            feedback = feedback
+            feedback=feedback
         )["OUTPUT"]
         return output
-    
-    def buffer(self, camada:QgsVectorLayer, valor: float, context: QgsProcessingContext = None, feedback: QgsFeedback =None) -> QgsVectorLayer:
+
+    def extractvertices(self, camada, context, feedback):
         output = processing.run(
-            "native:buffer",
+            "native:extractvertices",
             {
                 "INPUT": camada,
-                "DISTANCE": valor,
                 "OUTPUT": "memory:"
             },
             context=context,
-            feedback = feedback
+            feedback=feedback
         )["OUTPUT"]
-        return output   
+        return output
 
-    def is_outside_tolerance(self, geom, buffer_layer):
-        """Check if the geometry is outside the tolerance (buffer)."""
-        for feature in buffer_layer.getFeatures():
-            buffer_geom = feature.geometry()
-            if geom.within(buffer_geom):
-                return False
-        return True
+    def lineintersections(self, camada1, camada2, context, feedback):
+        output = processing.run(
+            "native:lineintersections",
+            {
+                "INPUT": camada1,
+                "INTERSECT": camada2,
+                "INPUT_FIELDS": [],
+                "INTERSECT_FIELDS": [],
+                "INTERSECT_FIELDS_PREFIX": '',
+                "OUTPUT": "memory:"
+            },
+            context=context,
+            feedback=feedback
+        )["OUTPUT"]
+        return output
 
+    def intersection(self, camada1, camada2, context, feedback):
+        output = processing.run(
+            "native:intersection",
+            {
+                "INPUT": camada1,
+                "OVERLAY": camada2,
+                "INPUT_FIELDS": [],
+                "OVERLAY_FIELDS": [],
+                "OVERLAY_FIELDS_PREFIX": '',
+                "GRID_SIZE": None,
+                "OUTPUT": "memory:"
+            },
+            context=context,
+            feedback=feedback
+        )["OUTPUT"]
+        return output
 
-    
+    def filtrar_tipos(self, camada, context, feedback):
+        expression = '"tipo" IN (501, 401, 203)'
+        filtered_layer = processing.run(
+            "native:extractbyexpression",
+            {
+                'INPUT': camada,
+                'EXPRESSION': expression,
+                'OUTPUT': 'memory:'
+            },
+            context=context,
+            feedback=feedback
+        )["OUTPUT"]
+        return filtered_layer
+
+    def filtrar_tipos2(self, camada, context, feedback):
+        expression = '"tipo" IN (501, 401, 203) AND "modal_uso" = 4'
+        filtered_layer = processing.run(
+            "native:extractbyexpression",
+            {
+                'INPUT': camada,
+                'EXPRESSION': expression,
+                'OUTPUT': 'memory:'
+            },
+            context=context,
+            feedback=feedback
+        )["OUTPUT"]
+        return filtered_layer
+
+    def filtrar_tipos3(self, camada, context, feedback):
+        expression = '"tipo" IN (203) AND "modal_uso" = 4'
+        filtered_layer = processing.run(
+            "native:extractbyexpression",
+            {
+                'INPUT': camada,
+                'EXPRESSION': expression,
+                'OUTPUT': 'memory:'
+            },
+            context=context,
+            feedback=feedback
+        )["OUTPUT"]
+        return filtered_layer
+
     def name(self):
-        """
-        Returns the algorithm name, used for identifying the algorithm. This
-        string should be fixed for the algorithm, and must not be localised.
-        The name should be unique within each provider. Names should contain
-        lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
         return 'Solução complementar do projeto 4'
 
     def displayName(self):
-        """
-        Returns the translated algorithm name, which should be used for any
-        user-visible display of the algorithm name.
-        """
         return self.tr(self.name())
 
     def group(self):
-        """
-        Returns the name of the group this algorithm belongs to. This string
-        should be localised.
-        """
         return self.tr(self.groupId())
 
     def groupId(self):
-        """
-        Returns the unique ID of the group this algorithm belongs to. This
-        string should be fixed for the algorithm, and must not be localised.
-        The group id should be unique within each provider. Group id should
-        contain lowercase alphanumeric characters only and no spaces or other
-        formatting characters.
-        """
         return 'Projeto 4'
 
     def tr(self, string):
