@@ -51,7 +51,8 @@ from qgis.core import (
     QgsFeature,
     QgsGeometry,
     QgsWkbTypes,
-    QgsPointXY
+    QgsPointXY,
+    QgsFeatureSink
 )
 from qgis import processing
 from qgis.PyQt.QtCore import QVariant
@@ -157,16 +158,16 @@ class DadosMDTComplementarAlgorithm(QgsProcessingAlgorithm):
         return highest_point, highest_value
 
     def name(self):
-        return 'DadosMDTComplementarAlgorithm'
+        return 'Solução complementar do projeto 2'
 
     def displayName(self):
         return self.tr(self.name())
 
     def group(self):
-        return self.tr('Your Group Name')
+        return self.tr(self.groupId())
 
     def groupId(self):
-        return 'your_group_id'
+        return 'Projeto 2'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
