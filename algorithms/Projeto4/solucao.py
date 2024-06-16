@@ -205,6 +205,8 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                 sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
         return {self.OUTPUT: dest_id}
+    
+    #Processings
 
     def pointonsurface(self, camada, context, feedback):
         output = processing.run(
