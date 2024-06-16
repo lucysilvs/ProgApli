@@ -141,18 +141,20 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                 self.tr("Regra 3")
             )
 
-        #Regra 3
+        # Regra 3
         filtered_layer = self.filtrar_tipos(elemento_viario_camada, context, feedback)
         intersecao3 = self.intersection(intersecoes_camada, filtered_layer, context, feedback)
 
         intersecao3_ids = {f['id'] for f in intersecao3.getFeatures()}
+        ids_ja_adicionados = set()
         for feature in intersecoes_camada.getFeatures():
-            if feature['id'] not in intersecao3_ids:
+            if feature['id'] not in intersecao3_ids and feature['id'] not in ids_ja_adicionados:
                 new_feature = QgsFeature(campos)
                 new_feature.setGeometry(feature.geometry())
                 new_feature['id'] = feature['id']
                 new_feature['erro'] = "erro na regra 3"
                 sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+                ids_ja_adicionados.add(feature['id'])
 
         currentStep += 1
         if multiStepFeedback is not None:
@@ -181,8 +183,9 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                 self.tr("Regra 5")
             )
 
-        #Regra 5
+        # Regra 5
         filtered_layer3 = self.filtrar_tipos3(elemento_viario_camada, context, feedback)
+        ponte_ids = set()
         for ponte in filtered_layer3.getFeatures():
             ponte_geom = ponte.geometry().asPoint()
             coincidentes = [via for via in vertices_via_deslocamento.getFeatures() if via.geometry().asPoint().distance(ponte_geom) < 1e-6]
@@ -192,17 +195,23 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                     if (ponte['nr_faixas'] != via['nr_faixas'] or
                         ponte['nr_pistas'] != via['nr_pistas'] or
                         ponte['situacao_fisica'] != via['situacao_fisica']):
-                        new_feature = QgsFeature(campos)
-                        new_feature.setGeometry(ponte.geometry())
-                        new_feature['id'] = ponte['id']
-                        new_feature['erro'] = "erro na regra 5 - atributos da ponte não coincidem com a via"
-                        sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+                        if ponte['id'] not in ponte_ids:
+                            new_feature = QgsFeature(campos)
+                            new_feature.setGeometry(ponte.geometry())
+                            new_feature['id'] = ponte['id']
+                            new_feature['erro'] = "erro na regra 5 - atributos da ponte não coincidem com a via"
+                            ponte_ids.add(new_feature['id'])
+                            sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
             else:
-                new_feature = QgsFeature(campos)
-                new_feature.setGeometry(ponte.geometry())
-                new_feature['id'] = ponte['id']
-                new_feature['erro'] = "erro na regra 5 - ponte não coincide com um vértice de via de deslocamento"
-                sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+                if ponte['id'] not in ponte_ids:
+                    new_feature = QgsFeature(campos)
+                    new_feature.setGeometry(ponte.geometry())
+                    new_feature['id'] = ponte['id']
+                    new_feature['erro'] = "erro na regra 5 - ponte não coincide com um vértice de via de deslocamento"
+                    ponte_ids.add(new_feature['id'])
+                    sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
+
+
 
         return {self.OUTPUT: dest_id}
     
