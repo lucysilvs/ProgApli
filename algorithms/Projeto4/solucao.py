@@ -53,7 +53,17 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
         trecho_drenagem_camada = self.parameterAsVectorLayer(parameters, self.TRECHO_DRENAGEM, context)
         via_deslocamento_camada = self.parameterAsVectorLayer(parameters, self.VIA_DESLOC, context)
 
-        multiStepFeedback = QgsProcessingMultiStepFeedback(3, feedback) if feedback is not None else None
+        currentStep = 0
+        multiStepFeedback = (
+            QgsProcessingMultiStepFeedback(3, feedback)
+            if feedback is not None
+            else None
+        )     
+        if multiStepFeedback is not None:
+            multiStepFeedback.setCurrentStep(currentStep)
+            multiStepFeedback.pushInfo(
+                self.tr("Regra 1")
+            )
 
         ponto_camadas = [elemento_viario_camada,
                          self.pointonsurface(trecho_drenagem_camada, context, feedback),
@@ -70,23 +80,23 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                 new_feature.setGeometry(feature.geometry())
                 new_feature['id'] = feature['id']
 
-                # Rule 1.1: situacao_fisica must be 3 (Construída)
+                #Regra 1.1:
                 if 'situacao_fisica' in feature.fields().names() and feature['situacao_fisica'] != 3:
                     new_feature['erro'] = "erro na regra 1 - não possui o atributo 'situacao_fisica' preenchido com 3 (Construída)"
                     sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-                # Rule 1.2: tipo 401 and material_construcao not equal to 97
+                #Regra 1.2:
                 if 'tipo' in feature.fields().names() and feature['tipo'] == 401 and feature['material_construcao'] != 97:
                     new_feature['erro'] = "erro na regra 1 - 'material_construcao' não é 97 (não aplicável) para 'tipo' 401"
                     sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-                # Rule 1.3: via de deslocamento or tipo 203 must have nr_pistas <= nr_faixas and both at least 1
+                #Regra 1.3:
                 if camada == ponto_camadas[2] or ('tipo' in feature.fields().names() and feature['tipo'] == 203):
                     if 'nr_pistas' in feature.fields().names() and 'nr_faixas' in feature.fields().names():
                         nr_pistas = feature['nr_pistas']
                         nr_faixas = feature['nr_faixas']
 
-                        # Check if nr_pistas and nr_faixas are NULL
+                        #Verifica se nr_pistas and nr_faixas são NULL
                         if nr_pistas == NULL or nr_faixas == NULL:
                             new_feature['erro'] = "erro na regra 1 - 'nr_pistas' e 'nr_faixas' devem ser no mínimo 1"
                             sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
@@ -100,14 +110,21 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                                 new_feature['erro'] = "erro na regra 1 - 'nr_pistas' não pode ser maior que 'nr_faixas'"
                                 sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        # Extract vertices and find intersections
+        currentStep += 1
+        if multiStepFeedback is not None:
+            multiStepFeedback.setCurrentStep(currentStep)
+            multiStepFeedback.pushInfo(
+                self.tr("Regra 2")
+            )
+
+
+        #Regra 2
         vertices_trecho_drenagem = self.extractvertices(trecho_drenagem_camada, context, feedback)
         vertices_via_deslocamento = self.extractvertices(via_deslocamento_camada, context, feedback)
         intersecoes_camada = self.lineintersections(trecho_drenagem_camada, via_deslocamento_camada, context, feedback)
         intersecao1 = self.intersection(intersecoes_camada, vertices_trecho_drenagem, context, feedback)
         intersecao2 = self.intersection(intersecao1, vertices_via_deslocamento, context, feedback)
 
-        # Identify IDs in intersecoes_camada not in intersecao2
         intersecao2_ids = {f['id'] for f in intersecao2.getFeatures()}
         for feature in intersecoes_camada.getFeatures():
             if feature['id'] not in intersecao2_ids:
@@ -117,11 +134,17 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                 new_feature['erro'] = "erro na regra 2"
                 sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        # Regra 3: Interseção com tipos específicos
+        currentStep += 1
+        if multiStepFeedback is not None:
+            multiStepFeedback.setCurrentStep(currentStep)
+            multiStepFeedback.pushInfo(
+                self.tr("Regra 3")
+            )
+
+        #Regra 3
         filtered_layer = self.filtrar_tipos(elemento_viario_camada, context, feedback)
         intersecao3 = self.intersection(intersecoes_camada, filtered_layer, context, feedback)
 
-        # Identify IDs in intersecoes_camada not in intersecao3
         intersecao3_ids = {f['id'] for f in intersecao3.getFeatures()}
         for feature in intersecoes_camada.getFeatures():
             if feature['id'] not in intersecao3_ids:
@@ -131,11 +154,17 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                 new_feature['erro'] = "erro na regra 3"
                 sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        # Regra 4: Interseção com tipos e modal_uso específicos
+        currentStep += 1
+        if multiStepFeedback is not None:
+            multiStepFeedback.setCurrentStep(currentStep)
+            multiStepFeedback.pushInfo(
+                self.tr("Regra 4")
+            )
+
+        #Regra 4
         filtered_layer2 = self.filtrar_tipos2(elemento_viario_camada, context, feedback)
         intersecao4 = self.intersection(filtered_layer2, intersecoes_camada, context, feedback)
 
-        # Identify IDs in intersecao4 not in intersecoes_camada
         intersecao4_ids = {f['id'] for f in intersecao4.getFeatures()}
         for feature in filtered_layer2.getFeatures():
             if feature['id'] not in intersecao4_ids:
@@ -145,7 +174,14 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                 new_feature['erro'] = "erro na regra 4"
                 sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
-        # Regra 5: Garantir que as pontes coincidam com vértices de via de deslocamento e atributos coincidam
+        currentStep += 1
+        if multiStepFeedback is not None:
+            multiStepFeedback.setCurrentStep(currentStep)
+            multiStepFeedback.pushInfo(
+                self.tr("Regra 5")
+            )
+
+        #Regra 5
         filtered_layer3 = self.filtrar_tipos3(elemento_viario_camada, context, feedback)
         for ponte in filtered_layer3.getFeatures():
             ponte_geom = ponte.geometry().asPoint()
@@ -169,6 +205,8 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
                 sink.addFeature(new_feature, QgsFeatureSink.FastInsert)
 
         return {self.OUTPUT: dest_id}
+    
+    #Processings
 
     def pointonsurface(self, camada, context, feedback):
         output = processing.run(
