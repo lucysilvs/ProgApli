@@ -118,6 +118,7 @@ class ValidacaoAlgorithm(QgsProcessingAlgorithm):
             )
 
 
+
         #Regra 2
         vertices_trecho_drenagem = self.extractvertices(trecho_drenagem_camada, context, feedback)
         vertices_via_deslocamento = self.extractvertices(via_deslocamento_camada, context, feedback)
